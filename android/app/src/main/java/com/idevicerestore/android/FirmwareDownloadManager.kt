@@ -89,7 +89,7 @@ class FirmwareDownloadManager(
         onEvent: (Event) -> Unit = {}
     ): Session {
         check(!closed.get()) { "FirmwareDownloadManager is closed" }
-        val plan = plan(firmware)
+        var plan = plan(firmware)
         val key = plan.destination.absolutePath
         active[key]?.let { existing ->
             logger("FirmwareDownloadManager: reusing active session for $key")
@@ -97,19 +97,42 @@ class FirmwareDownloadManager(
         }
 
         if (plan.complete) {
-            val sha1 = firmware.sha1.orEmpty()
-            val result = FirmwareDownloader.Result(
-                file = plan.destination,
-                bytes = plan.destination.length(),
-                sha1 = sha1,
-                resumed = false,
-                segmented = false
-            )
-            val session = Session(plan, null, AtomicBoolean(false))
-            onEvent(Event.Started(plan))
-            onEvent(Event.Completed(plan, result))
-            logger("FirmwareDownloadManager: already complete ${plan.destination.absolutePath}")
-            return session
+            val expectedSha1 = firmware.sha1?.takeIf { it.isNotBlank() }
+            val actualSha1 = if (expectedSha1 != null) {
+                logger("FirmwareDownloadManager: verifying existing firmware before reuse")
+                val verification = FirmwareIntegrity.verifySha1(plan.destination, expectedSha1)
+                if (!verification.matches) {
+                    logger(
+                        "FirmwareDownloadManager: existing firmware checksum mismatch; " +
+                            "expected=$expectedSha1 actual=${verification.sha1}; redownloading"
+                    )
+                    if (!plan.destination.delete()) {
+                        error("Could not remove invalid firmware ${plan.destination.absolutePath}")
+                    }
+                    plan = plan.copy(complete = false)
+                    null
+                } else {
+                    verification.sha1
+                }
+            } else {
+                logger("FirmwareDownloadManager: no catalog SHA-1; reusing existing file by size")
+                ""
+            }
+
+            if (plan.complete) {
+                val result = FirmwareDownloader.Result(
+                    file = plan.destination,
+                    bytes = plan.destination.length(),
+                    sha1 = actualSha1.orEmpty(),
+                    resumed = false,
+                    segmented = false
+                )
+                val session = Session(plan, null, AtomicBoolean(false))
+                onEvent(Event.Started(plan))
+                onEvent(Event.Completed(plan, result))
+                logger("FirmwareDownloadManager: verified existing firmware ${plan.destination.absolutePath}")
+                return session
+            }
         }
 
         val remaining = if (firmware.fileSize > 0) {
