@@ -14,6 +14,39 @@
             android:text="No Apple USB device selected"
             android:textSize="18sp"
             android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="#1A000000"
+            android:orientation="vertical"
+            android:padding="14dp">
+            <TextView
+                android:id="@+id/operationTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Restore preparation"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/operationStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Waiting for device and firmware"
+                android:textSize="16sp" />
+            <ProgressBar
+                android:id="@+id/operationProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:indeterminate="true"
+                android:max="100"
+                android:visibility="gone" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/scanButton"
             android:layout_width="match_parent"
