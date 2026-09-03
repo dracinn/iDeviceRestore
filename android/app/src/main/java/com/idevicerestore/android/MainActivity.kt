@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.idevicerestore.android.databinding.ActivityMainBinding
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,12 +24,15 @@ class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
     private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
+    private val firmwareStorage by lazy { FirmwareStorage(this) }
 
     @Volatile
     private var probeInFlight = false
     private var lastAutoProbeDeviceName: String? = null
     private var identifiedDevice: FirmwareCatalog.Device? = null
     private var latestSignedFirmware: FirmwareCatalog.Firmware? = null
+    private var firmwareWorkspace: FirmwareStorage.Workspace? = null
+    private var firmwareDestination: File? = null
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -58,6 +62,8 @@ class MainActivity : AppCompatActivity() {
                         lastAutoProbeDeviceName = null
                         identifiedDevice = null
                         latestSignedFirmware = null
+                        firmwareWorkspace = null
+                        firmwareDestination = null
                     }
                     scan()
                 }
@@ -88,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         log("Automatic DFU / Recovery probing: enabled")
         log("Automatic pseudo-release pipeline: enabled")
+        log("Shared diagnostic privacy redaction: enabled")
         scan()
     }
 
@@ -111,6 +118,8 @@ class MainActivity : AppCompatActivity() {
             lastAutoProbeDeviceName = null
             identifiedDevice = null
             latestSignedFirmware = null
+            firmwareWorkspace = null
+            firmwareDestination = null
             binding.status.text = "No Apple USB device found"
             binding.probeButton.isEnabled = false
             return
@@ -258,6 +267,17 @@ class MainActivity : AppCompatActivity() {
                         (catalogDevice.boardConfig?.let { " board=$it" } ?: "") +
                         (catalogDevice.platform?.let { " platform=$it" } ?: "")
                 )
+
+                runCatching { firmwareStorage.prepare(catalogDevice.identifier) }
+                    .onFailure { error ->
+                        logUi("Firmware storage setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                    }
+                    .onSuccess { workspace ->
+                        firmwareWorkspace = workspace
+                        logUi("Firmware storage root: ${workspace.root.absolutePath}")
+                        logUi("Device firmware directory: ${workspace.firmware.absolutePath}")
+                    }
+
                 runOnUiThread {
                     if (selected?.deviceName == device.deviceName) {
                         binding.status.text = "${catalogDevice.name} (${catalogDevice.identifier}) — ${AppleUsb.mode(device)}"
@@ -277,6 +297,16 @@ class MainActivity : AppCompatActivity() {
                             val size = if (firmware.fileSize >= 0) " size=${firmware.fileSize} bytes" else ""
                             logUi("Latest signed firmware: ${firmware.version} (${firmware.buildId})$size")
                             logUi("Latest signed firmware URL: ${firmware.url}")
+
+                            firmwareWorkspace?.let { workspace ->
+                                val fallback = "${catalogDevice.identifier}_${firmware.version}_${firmware.buildId}.ipsw"
+                                    .replace(Regex("[^A-Za-z0-9,._-]"), "_")
+                                val fileName = firmware.url.substringAfterLast('/').substringBefore('?')
+                                    .takeIf { it.endsWith(".ipsw", ignoreCase = true) && it.isNotBlank() }
+                                    ?: fallback
+                                firmwareDestination = File(workspace.firmware, fileName)
+                                logUi("Firmware download destination: ${firmwareDestination?.absolutePath}")
+                            }
                         }
                     }
             }
@@ -298,16 +328,22 @@ class MainActivity : AppCompatActivity() {
             appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Latest signed firmware: ${it.version} (${it.buildId})") }
+            firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
+            appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
             appendLine("---")
             append(logBuffer.toString())
         }
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, "iDeviceRestore diagnostic log")
-            putExtra(Intent.EXTRA_TEXT, report)
+            putExtra(Intent.EXTRA_TEXT, redactForSharing(report))
         }
         startActivity(Intent.createChooser(share, "Share verbose logs"))
     }
+
+    private fun redactForSharing(text: String): String = text
+        .replace(Regex("(?i)(ECID[:=])(?:0x)?[0-9a-f]+"), "$1[REDACTED]")
+        .replace(Regex("(?i)(SRNM:)\\[[^]]*]"), "$1[REDACTED]")
 
     private fun Intent.usbDevice(): UsbDevice? = if (Build.VERSION.SDK_INT >= 33) {
         getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
