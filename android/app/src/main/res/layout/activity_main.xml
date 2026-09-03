@@ -2,153 +2,28 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="No Apple USB device selected"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:background="#1A000000"
-            android:orientation="vertical"
-            android:padding="14dp">
-            <TextView
-                android:id="@+id/operationTitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Restore preparation"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-            <TextView
-                android:id="@+id/operationStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Waiting for device and firmware"
-                android:textSize="16sp" />
-            <ProgressBar
-                android:id="@+id/operationProgress"
-                style="?android:attr/progressBarStyleHorizontal"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:indeterminate="true"
-                android:max="100"
-                android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
+        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="No Apple USB device selected" android:textSize="18sp" android:textStyle="bold" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:background="#1A000000" android:orientation="vertical" android:padding="14dp">
+            <TextView android:id="@+id/operationTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Restore preparation" android:textSize="18sp" android:textStyle="bold" />
+            <TextView android:id="@+id/operationStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Waiting for device and firmware" android:textSize="16sp" />
+            <ProgressBar android:id="@+id/operationProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:indeterminate="true" android:max="100" android:visibility="gone" />
         </LinearLayout>
-
-        <Button
-            android:id="@+id/scanButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Scan Apple USB devices" />
-        <Button
-            android:id="@+id/probeButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Probe DFU / Recovery" />
-
-        <TextView
-            android:id="@+id/firmwareTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Firmware"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-        <TextView
-            android:id="@+id/firmwareStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="Waiting for device identification" />
-        <ProgressBar
-            android:id="@+id/firmwareProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:max="1000"
-            android:progress="0" />
-        <TextView
-            android:id="@+id/firmwareProgressText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="" />
-        <Button
-            android:id="@+id/selectFirmwareButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:enabled="false"
-            android:text="Select signed firmware" />
-        <Button
-            android:id="@+id/downloadFirmwareButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Download firmware" />
-        <Button
-            android:id="@+id/cancelDownloadButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="Cancel download" />
-
-        <Button
-            android:id="@+id/settingsButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Settings" />
-        <Button
-            android:id="@+id/shareLogsButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Share verbose logs" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Activity Log"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-        <TextView
-            android:id="@+id/logView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:textSize="13sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Probe Log"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-        <TextView
-            android:id="@+id/probeLogView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:textSize="13sp" />
+        <Button android:id="@+id/scanButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Scan Apple USB devices" />
+        <Button android:id="@+id/probeButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Probe DFU / Recovery" />
+        <Button android:id="@+id/dfuGuideButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Guide me into DFU mode" />
+        <TextView android:id="@+id/firmwareTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Firmware" android:textSize="17sp" android:textStyle="bold" />
+        <TextView android:id="@+id/firmwareStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Waiting for device identification" />
+        <ProgressBar android:id="@+id/firmwareProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:max="1000" android:progress="0" />
+        <TextView android:id="@+id/firmwareProgressText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" />
+        <Button android:id="@+id/selectFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Select signed firmware" />
+        <Button android:id="@+id/downloadFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Download firmware" />
+        <Button android:id="@+id/cancelDownloadButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Cancel download" />
+        <Button android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Settings" />
+        <Button android:id="@+id/shareLogsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share verbose logs" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Activity Log" android:textSize="16sp" android:textStyle="bold" />
+        <TextView android:id="@+id/logView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:fontFamily="monospace" android:textIsSelectable="true" android:textSize="13sp" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Probe Log" android:textSize="16sp" android:textStyle="bold" />
+        <TextView android:id="@+id/probeLogView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:fontFamily="monospace" android:textIsSelectable="true" android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>
