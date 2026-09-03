@@ -1,16 +1,22 @@
 package com.idevicerestore.android
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import java.io.File
 
 /**
- * App-owned firmware workspace. No broad storage permission is required.
+ * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
  *
- * Layout:
- *   iDeviceRestore/Firmware/<identifier>/IPSW/<version>-<build>/<firmware>.ipsw
- *   iDeviceRestore/Firmware/<identifier>/Metadata/catalog.json
- *   iDeviceRestore/Firmware/<identifier>/Logs/
+ * Canonical layout:
+ *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/IPSW/<version>-<build>/<firmware>.ipsw
+ *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Metadata/catalog.json
+ *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Logs/
+ *
+ * Android 11+ requires MANAGE_EXTERNAL_STORAGE (All files access) for direct File access here.
+ * Direct File access is intentional because segmented/resumable IPSW transfers use independent
+ * .part files, random-access-friendly paths, atomic rename, and later restore components need a
+ * stable filesystem path to the IPSW.
  */
 class FirmwareStorage(
     private val context: Context,
@@ -31,16 +37,35 @@ class FirmwareStorage(
         val catalogCache: File
     )
 
+    /** Existing user-visible project folder at the root of primary shared storage. */
+    val projectRoot: File
+        get() = File(Environment.getExternalStorageDirectory(), "iDeviceRestore")
+
+    fun hasSharedStorageAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            @Suppress("DEPRECATION")
+            Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED && projectRoot.canWrite()
+        }
+
+    fun requireSharedStorageAccess() {
+        check(hasSharedStorageAccess()) {
+            "Shared storage access is required for ${projectRoot.absolutePath}. " +
+                "Enable 'Allow access to manage all files' for iDeviceRestore."
+        }
+    }
+
     fun prepare(identifier: String): Workspace {
+        requireSharedStorageAccess()
         val safeIdentifier = safeComponent(identifier)
-        val external = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: context.filesDir
-        val root = File(external, "iDeviceRestore/Firmware")
+        val root = File(projectRoot, "Firmware")
         val device = File(root, safeIdentifier)
         val firmware = File(device, "IPSW")
         val metadata = File(device, "Metadata")
         val logs = File(device, "Logs")
-        listOf(root, device, firmware, metadata, logs).forEach(::ensureDirectory)
+        listOf(projectRoot, root, device, firmware, metadata, logs).forEach(::ensureDirectory)
+        logger("FirmwareStorage: shared project root=${projectRoot.absolutePath}")
         logger("FirmwareStorage: workspace=${device.absolutePath}")
         return Workspace(root, device, firmware, metadata, logs)
     }
