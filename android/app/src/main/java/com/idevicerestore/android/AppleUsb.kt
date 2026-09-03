@@ -178,4 +178,44 @@ object AppleUsb {
 
         return null
     }
+
+    /**
+     * Claims a secondary Recovery alternate setting that exposes a bulk-IN endpoint.
+     * The primary iBoot command/control interface remains interface 0/alt 0.
+     * This helper is diagnostic/read-only and is not used for firmware upload.
+     */
+    fun claimRecoveryConsoleInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
+        if (mode(device) != Mode.RECOVERY) return null
+
+        val candidates = mutableListOf<Candidate>()
+        for (i in 0 until device.interfaceCount) {
+            val intf = device.getInterface(i)
+            if (intf.id == 0) continue
+            var bulkIn: UsbEndpoint? = null
+            var bulkOut: UsbEndpoint? = null
+            for (e in 0 until intf.endpointCount) {
+                val ep = intf.getEndpoint(e)
+                if (ep.type != UsbConstants.USB_ENDPOINT_XFER_BULK) continue
+                when (ep.direction) {
+                    UsbConstants.USB_DIR_IN -> if (bulkIn == null) bulkIn = ep
+                    UsbConstants.USB_DIR_OUT -> if (bulkOut == null) bulkOut = ep
+                }
+            }
+            if (bulkIn == null) continue
+            var score = 100
+            if (intf.alternateSetting > 0) score += 50
+            if (bulkOut != null) score += 10
+            candidates += Candidate(intf, bulkIn, bulkOut, score)
+        }
+
+        for (candidate in candidates.sortedByDescending { it.score }) {
+            if (!connection.claimInterface(candidate.intf, true)) continue
+            if (candidate.intf.alternateSetting != 0 && !connection.setInterface(candidate.intf)) {
+                connection.releaseInterface(candidate.intf)
+                continue
+            }
+            return Claimed(candidate.intf, candidate.bulkIn, candidate.bulkOut)
+        }
+        return null
+    }
 }
