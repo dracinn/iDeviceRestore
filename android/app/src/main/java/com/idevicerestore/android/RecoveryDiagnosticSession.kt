@@ -21,10 +21,24 @@ class RecoveryDiagnosticSession(
         val error: Throwable?
     )
 
+    data class Readiness(
+        val commandTransportReady: Boolean,
+        val recoveryMode: Boolean,
+        val buildVersion: String?,
+        val buildStyle: String?,
+        val autoBoot: String?,
+        val bootStage: String?,
+        val reasons: List<String>
+    ) {
+        val readyForControlledUpload: Boolean
+            get() = commandTransportReady && recoveryMode
+    }
+
     data class Snapshot(
         val variables: List<VariableResult>,
         val console: RecoveryConsoleTransport.ReadResult?,
-        val consoleError: Throwable?
+        val consoleError: Throwable?,
+        val readiness: Readiness
     )
 
     fun snapshot(
@@ -50,10 +64,44 @@ class RecoveryDiagnosticSession(
             consoleError = it
         }
 
-        return Snapshot(results, consoleResult, consoleError)
+        return Snapshot(
+            variables = results,
+            console = consoleResult,
+            consoleError = consoleError,
+            readiness = buildReadiness(results)
+        )
+    }
+
+    private fun buildReadiness(results: List<VariableResult>): Readiness {
+        val values = results.associate { it.name to it.result?.value?.takeIf(String::isNotBlank) }
+        val failures = results.filter { it.result == null }
+        val reasons = buildList {
+            if (AppleUsb.mode(device) != AppleUsb.Mode.RECOVERY) {
+                add("USB device is not classified as Recovery mode")
+            }
+            if (failures.isNotEmpty()) {
+                add("${failures.size} iBoot environment query(s) failed")
+            }
+            if (values["build-version"].isNullOrBlank()) {
+                add("iBoot build-version was not returned")
+            }
+            if (values["build-style"].isNullOrBlank()) {
+                add("iBoot build-style was not returned")
+            }
+        }
+
+        return Readiness(
+            commandTransportReady = failures.isEmpty() && !values["build-version"].isNullOrBlank(),
+            recoveryMode = AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY,
+            buildVersion = values["build-version"],
+            buildStyle = values["build-style"],
+            autoBoot = values["auto-boot"],
+            bootStage = values["boot-stage"],
+            reasons = reasons
+        )
     }
 
     companion object {
-        val DEFAULT_VARIABLES = listOf("build-version", "build-style", "auto-boot")
+        val DEFAULT_VARIABLES = listOf("build-version", "build-style", "auto-boot", "boot-stage")
     }
 }
