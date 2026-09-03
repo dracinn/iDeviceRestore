@@ -10,12 +10,12 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import com.idevicerestore.android.databinding.ActivityMainBinding
 import java.io.File
 import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -27,7 +27,9 @@ class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
     private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
+    private val betaFirmwareCatalog by lazy { BetaFirmwareCatalog(logger = { message -> logUi(message) }) }
     private val firmwareStorage by lazy { FirmwareStorage(this, logger = { message -> logUi(message) }) }
+    private val appSettings by lazy { AppSettings(this) }
 
     @Volatile
     private var probeInFlight = false
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private var firmwareDestination: File? = null
     private var sharedStorageSettingsOpened = false
     private var sharedStorageAccessLogged = false
+    private var lastIncludeBetaSetting = false
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -81,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         usbManager = getSystemService(USB_SERVICE) as UsbManager
+        lastIncludeBetaSetting = appSettings.includeBetaFirmware
 
         val filter = IntentFilter().apply {
             addAction(permissionAction)
@@ -92,6 +96,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.scanButton.setOnClickListener { scan() }
         binding.probeButton.setOnClickListener { probeSelected(manual = true) }
+        binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         binding.shareLogsButton.setOnClickListener { shareLogs() }
 
         log("iDeviceRestore diagnostic session started")
@@ -100,6 +105,7 @@ class MainActivity : AppCompatActivity() {
         log("Automatic DFU / Recovery probing: enabled")
         log("Automatic pseudo-release pipeline: enabled")
         log("Shared diagnostic privacy redaction: enabled")
+        log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
         log("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
         ensureSharedStorageAccess(openSettings = true)
         scan()
@@ -108,6 +114,17 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (!::binding.isInitialized) return
+
+        val includeBeta = appSettings.includeBetaFirmware
+        if (includeBeta != lastIncludeBetaSetting) {
+            lastIncludeBetaSetting = includeBeta
+            log("Beta/RC firmware lookup changed: ${if (includeBeta) "enabled" else "disabled"}")
+            val currentDevice = selected
+            if (currentDevice != null && identifiedDevice != null) {
+                worker.execute { identifyDeviceAndFirmware(currentDevice) }
+            }
+        }
+
         val granted = ensureSharedStorageAccess(openSettings = !sharedStorageSettingsOpened)
         if (granted && sharedStorageSettingsOpened) {
             sharedStorageSettingsOpened = false
@@ -359,36 +376,77 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                logUi("Firmware catalog: checking latest signed IPSW for ${catalogDevice.identifier}")
-                runCatching { firmwareCatalog.latestSigned(catalogDevice.identifier) }
-                    .onFailure { error ->
-                        logUi("Signed firmware lookup failed: ${error.javaClass.simpleName}: ${error.message}")
-                    }
-                    .onSuccess { firmware ->
-                        latestSignedFirmware = firmware
-                        if (firmware == null) {
-                            logUi("Latest signed firmware: none reported")
-                        } else {
-                            val size = if (firmware.fileSize >= 0) " size=${firmware.fileSize} bytes" else ""
-                            logUi("Latest signed firmware: ${firmware.version} (${firmware.buildId})$size")
-                            logUi("Latest signed firmware URL: ${firmware.url}")
-
-                            if (firmwareStorage.hasSharedStorageAccess()) {
-                                runCatching { firmwareStorage.locationFor(firmware) }
-                                    .onSuccess { location ->
-                                        firmwareWorkspace = location.workspace
-                                        firmwareDestination = location.file
-                                        logUi("Firmware download destination: ${location.file.absolutePath}")
-                                    }
-                                    .onFailure { error ->
-                                        logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
-                                    }
-                            } else {
-                                logUi("Firmware destination pending shared storage permission")
-                            }
-                        }
-                    }
+                lookupPreferredFirmware(catalogDevice.identifier)
             }
+    }
+
+    private fun lookupPreferredFirmware(identifier: String) {
+        logUi("Firmware catalog: checking latest signed stable IPSW for $identifier")
+        val stable = runCatching { firmwareCatalog.latestSigned(identifier) }
+            .onFailure { error ->
+                logUi("Signed stable firmware lookup failed: ${error.javaClass.simpleName}: ${error.message}")
+            }
+            .getOrNull()
+
+        stable?.let {
+            val size = if (it.fileSize >= 0) " size=${it.fileSize} bytes" else ""
+            logUi("Latest signed stable firmware: ${it.version} (${it.buildId})$size")
+        }
+
+        var preferred = stable
+        if (appSettings.includeBetaFirmware) {
+            logUi("Beta/RC firmware lookup enabled: checking signed beta index for $identifier")
+            val beta = runCatching { betaFirmwareCatalog.latestSigned(identifier) }
+                .onFailure { error ->
+                    logUi("Beta/RC lookup unavailable: ${error.javaClass.simpleName}: ${error.message}")
+                }
+                .getOrNull()
+
+            beta?.let {
+                val size = if (it.fileSize >= 0) " size=${it.fileSize} bytes" else ""
+                logUi("Latest signed beta/RC firmware: ${it.version} (${it.buildId})$size")
+                preferred = chooseNewestSigned(stable, it)
+            }
+        }
+
+        latestSignedFirmware = preferred
+        if (preferred == null) {
+            logUi("Latest signed firmware: none reported")
+            firmwareDestination = null
+            return
+        }
+
+        val channel = if (preferred.version.contains("beta", ignoreCase = true) || preferred.version.contains("RC", ignoreCase = true)) {
+            "beta/RC"
+        } else {
+            "stable"
+        }
+        logUi("Selected signed firmware ($channel): ${preferred.version} (${preferred.buildId})")
+        logUi("Selected signed firmware URL: ${preferred.url}")
+
+        if (firmwareStorage.hasSharedStorageAccess()) {
+            runCatching { firmwareStorage.locationFor(preferred) }
+                .onSuccess { location ->
+                    firmwareWorkspace = location.workspace
+                    firmwareDestination = location.file
+                    logUi("Firmware download destination: ${location.file.absolutePath}")
+                }
+                .onFailure { error ->
+                    logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                }
+        } else {
+            logUi("Firmware destination pending shared storage permission")
+        }
+    }
+
+    private fun chooseNewestSigned(
+        stable: FirmwareCatalog.Firmware?,
+        beta: FirmwareCatalog.Firmware
+    ): FirmwareCatalog.Firmware {
+        if (stable == null) return beta
+        val stableDate = stable.releaseDate ?: Instant.EPOCH
+        val betaDate = beta.releaseDate ?: Instant.EPOCH
+        return if (betaDate.isAfter(stableDate)) beta else stable
     }
 
     private fun finishProbe(device: UsbDevice) = runOnUiThread {
@@ -407,8 +465,9 @@ class MainActivity : AppCompatActivity() {
             appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
             appendLine("Shared storage access: ${if (firmwareStorage.hasSharedStorageAccess()) "granted" else "not granted"}")
             appendLine("Project root: ${firmwareStorage.projectRoot.absolutePath}")
+            appendLine("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
-            latestSignedFirmware?.let { appendLine("Latest signed firmware: ${it.version} (${it.buildId})") }
+            latestSignedFirmware?.let { appendLine("Selected signed firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
             firmwareDestination?.let { appendLine("Firmware destination: ${it.absolutePath}") }
             appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
