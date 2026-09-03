@@ -48,10 +48,14 @@ class FirmwareCatalog(
             }
     }
 
-    fun listDevices(): List<Device> {
+    @Volatile
+    private var cachedDevices: List<Device>? = null
+
+    fun listDevices(forceRefresh: Boolean = false): List<Device> {
+        if (!forceRefresh) cachedDevices?.let { return it }
         logger("FirmwareCatalog: GET $endpoint/devices")
         val array = JSONArray(get("$endpoint/devices"))
-        return buildList {
+        val devices = buildList {
             for (i in 0 until array.length()) {
                 val item = array.getJSONObject(i)
                 add(
@@ -66,6 +70,22 @@ class FirmwareCatalog(
                 )
             }
         }.filter { it.identifier.isNotBlank() }
+        cachedDevices = devices
+        return devices
+    }
+
+    /** Match Apple's Recovery/DFU CPID + BDID pair to the catalog's concrete product. */
+    fun findDeviceByBootIds(cpid: Int, bdid: Int): Device? {
+        logger("FirmwareCatalog: identify CPID=0x%04X (%d) BDID=0x%02X (%d)".format(cpid, cpid, bdid, bdid))
+        val candidates = listDevices().filter { it.cpid == cpid && it.bdid == bdid }
+        return when {
+            candidates.isEmpty() -> null
+            candidates.size == 1 -> candidates.first()
+            else -> {
+                logger("FirmwareCatalog: ${candidates.size} device records share CPID/BDID; using ${candidates.first().identifier}")
+                candidates.first()
+            }
+        }
     }
 
     fun firmwares(identifier: String, signedOnly: Boolean = false): List<Firmware> {
