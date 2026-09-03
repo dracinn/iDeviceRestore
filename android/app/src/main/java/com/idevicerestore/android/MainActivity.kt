@@ -127,8 +127,14 @@ class MainActivity : AppCompatActivity() {
                     logUi("Could not claim a USB interface")
                     return@execute
                 }
-                logUi("Claimed interface ${claimed.intf.id}; class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}")
+                logUi(
+                    "Claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting}; " +
+                        "class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} " +
+                        "protocol=${claimed.intf.interfaceProtocol}"
+                )
                 logUi("Claimed bulk IN: ${claimed.bulkIn?.let { "0x%02x maxPacket=${it.maxPacketSize}".format(it.address) } ?: "none"}")
+                logUi("Claimed bulk OUT: ${claimed.bulkOut?.let { "0x%02x maxPacket=${it.maxPacketSize}".format(it.address) } ?: "none"}")
+
                 when (AppleUsb.mode(device)) {
                     AppleUsb.Mode.DFU -> {
                         logUi("Sending non-destructive DFU_GETSTATUS")
@@ -137,11 +143,12 @@ class MainActivity : AppCompatActivity() {
                             .onFailure { logUi("DFU probe failed: ${it.javaClass.simpleName}: ${it.message}") }
                     }
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
-                        logUi("Sending recovery command: getenv build-version")
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
-                        val sent = recovery.sendCommand("getenv build-version")
-                        logUi("Recovery command write: $sent bytes")
-                        logUi("Response: ${recovery.readConsole()}")
+                        logUi("Recovery getenv probe: build-version")
+                        val result = recovery.getenv("build-version")
+                        logUi("Recovery command control-OUT: ${result.commandBytes} bytes")
+                        logUi("Recovery getenv control-IN: ${result.responseBytes} bytes")
+                        logUi("build-version=${result.value.ifEmpty { "(empty)" }}")
                     }
                     AppleUsb.Mode.APPLE_OTHER -> logUi("Apple device is not classified as DFU/recovery; no command sent.")
                 }
