@@ -38,6 +38,16 @@ class IpswPreflight(
         val componentPaths: Map<String, String>
     )
 
+    private data class IdentityCandidate(
+        val index: Int,
+        var boardConfig: String? = null,
+        var chipId: Long? = null,
+        var boardId: Long? = null,
+        var variant: String? = null,
+        var productType: String? = null,
+        val componentPaths: LinkedHashMap<String, String> = linkedMapOf()
+    )
+
     fun inspect(request: Request): Result {
         require(request.ipsw.isFile) { "IPSW not found: ${request.ipsw.absolutePath}" }
         logger("IPSW preflight: opening ${request.ipsw.absolutePath}")
@@ -86,16 +96,6 @@ class IpswPreflight(
     private inner class ManifestHandler(
         private val request: Request
     ) : DefaultHandler() {
-        private data class Identity(
-            val index: Int,
-            var boardConfig: String? = null,
-            var chipId: Long? = null,
-            var boardId: Long? = null,
-            var variant: String? = null,
-            var productType: String? = null,
-            val componentPaths: LinkedHashMap<String, String> = linkedMapOf()
-        )
-
         private var depth = 0
         private val pendingKeys = mutableMapOf<Int, String>()
         private val text = StringBuilder()
@@ -112,8 +112,8 @@ class IpswPreflight(
         private var productVersion: String? = null
         private var productBuildVersion: String? = null
         private var identityCount = 0
-        private var current: Identity? = null
-        private var best: Pair<Int, Identity>? = null
+        private var current: IdentityCandidate? = null
+        private var best: Pair<Int, IdentityCandidate>? = null
 
         override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes?) {
             depth++
@@ -134,7 +134,7 @@ class IpswPreflight(
 
             val identitiesDepth = buildIdentitiesArrayDepth
             if (identitiesDepth != null && depth == identitiesDepth + 1 && current == null) {
-                current = Identity(index = identityCount++)
+                current = IdentityCandidate(index = identityCount++)
                 identityDepth = depth
                 return
             }
@@ -270,7 +270,7 @@ class IpswPreflight(
         }
     }
 
-    private fun scoreIdentity(identity: ManifestHandler.Identity, request: Request): Int {
+    private fun scoreIdentity(identity: IdentityCandidate, request: Request): Int {
         var score = 0
         request.boardConfig?.takeIf { it.isNotBlank() }?.let { expected ->
             val actual = identity.boardConfig ?: return -1
