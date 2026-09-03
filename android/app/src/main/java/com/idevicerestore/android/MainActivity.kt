@@ -87,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         log("Automatic DFU / Recovery probing: enabled")
+        log("Automatic pseudo-release pipeline: enabled")
         scan()
     }
 
