@@ -1,25 +1,20 @@
 name: Android Release
 
 on:
-  workflow_run:
-    workflows:
-      - Android CI
-    types:
-      - completed
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag version, e.g. 0.1.0.4 (leave automatic builds to choose the next number)'
+        description: 'Release version override, e.g. 0.1.0.4'
         required: true
 
 permissions:
   contents: write
 
-# Automatic releases must choose pseudo versions one at a time so two CI runs
-# cannot race and attempt to publish the same v0.1.0.N tag.
+# Releases choose pseudo versions one at a time so closely spaced commits cannot
+# race and attempt to publish the same v0.1.0.N tag.
 concurrency:
   group: android-release-series
   cancel-in-progress: false
@@ -28,18 +23,14 @@ env:
   DEVELOPMENT_BASE_VERSION: '0.1.0'
 
 jobs:
-  release-apk:
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+  build-sign-release:
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
-      - name: Checkout tested source
+      - name: Checkout commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Set up JDK 17
@@ -56,10 +47,10 @@ jobs:
       - name: Resolve release and app versions
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            BASE_VERSION="$DEVELOPMENT_BASE_VERSION"
-            git fetch --tags --force
+          git fetch --tags --force
 
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            BASE_VERSION="$DEVELOPMENT_BASE_VERSION"
             LAST_BUILD="$({
               git tag --list "v${BASE_VERSION}.*" \
                 | sed -nE "s/^v${BASE_VERSION//./\\.}\.([0-9]+)$/\\1/p" \
@@ -74,18 +65,11 @@ jobs:
             fi
 
             RELEASE_VERSION="${BASE_VERSION}.${NEXT_BUILD}"
-            TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
-            echo "Automatic release selected next pseudo version: $RELEASE_VERSION"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            RELEASE_VERSION="${GITHUB_REF_NAME#v}"
-            TARGET_SHA="$GITHUB_SHA"
+            echo "Commit-triggered release selected: $RELEASE_VERSION"
           else
             RELEASE_VERSION="${{ inputs.version }}"
-            TARGET_SHA="$GITHUB_SHA"
           fi
 
-          # Development releases may add a fourth numeric component so Obtainium
-          # sees a newer release while Android still displays the base x.y.z version.
           if [[ "$RELEASE_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(\.([0-9]+))?$ ]]; then
             VERSION_NAME="${BASH_REMATCH[1]}"
             PSEUDO_BUILD="${BASH_REMATCH[3]:-0}"
@@ -94,8 +78,6 @@ jobs:
             exit 1
           fi
 
-          # Refuse to overwrite an existing release/tag. This also catches any
-          # unexpected race or a manually supplied duplicate version.
           if git rev-parse "refs/tags/v${RELEASE_VERSION}" >/dev/null 2>&1; then
             echo "Tag v${RELEASE_VERSION} already exists; refusing to overwrite it."
             exit 1
@@ -104,11 +86,8 @@ jobs:
           echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "PSEUDO_BUILD=$PSEUDO_BUILD" >> "$GITHUB_ENV"
-          echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
-          # Android requires versionCode to increase for an APK update. The release
-          # workflow run number remains monotonic while versionName stays fixed.
           echo "VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "Release $RELEASE_VERSION -> app versionName $VERSION_NAME, versionCode ${GITHUB_RUN_NUMBER}, source $TARGET_SHA"
+          echo "Release $RELEASE_VERSION -> app versionName $VERSION_NAME, versionCode ${GITHUB_RUN_NUMBER}, source $GITHUB_SHA"
 
       - name: Validate signing secrets
         env:
@@ -154,7 +133,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.RELEASE_VERSION }}
-          target_commitish: ${{ env.TARGET_SHA }}
+          target_commitish: ${{ github.sha }}
           files: iDeviceRestore.apk
           generate_release_notes: true
           name: iDeviceRestore Android ${{ env.RELEASE_VERSION }}
