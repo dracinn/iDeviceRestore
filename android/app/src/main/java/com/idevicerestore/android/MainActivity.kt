@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
     private var probeInFlight = false
     @Volatile
     private var probeLogging = false
+    @Volatile
+    private var firmwareSelectionInFlight = false
     private var lastAutoProbeDeviceName: String? = null
     private var identifiedDevice: FirmwareCatalog.Device? = null
     private var latestSignedFirmware: FirmwareCatalog.Firmware? = null
@@ -76,9 +78,8 @@ class MainActivity : AppCompatActivity() {
                     if (device != null && device.deviceName == lastAutoProbeDeviceName) {
                         lastAutoProbeDeviceName = null
                         identifiedDevice = null
-                        latestSignedFirmware = null
+                        clearFirmwareSelection("device detached", logChange = false)
                         firmwareWorkspace = null
-                        firmwareDestination = null
                         updateFirmwareUi()
                     }
                     scan()
@@ -106,6 +107,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.scanButton.setOnClickListener { scan() }
         binding.probeButton.setOnClickListener { probeSelected(manual = true) }
+        binding.selectFirmwareButton.setOnClickListener { selectFirmwareManually() }
         binding.downloadFirmwareButton.setOnClickListener { startFirmwareDownload() }
         binding.cancelDownloadButton.setOnClickListener { cancelFirmwareDownload() }
         binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
@@ -115,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         log("Automatic DFU / Recovery probing: enabled")
+        log("Firmware selection: manual tap required each app session")
         log("Automatic pseudo-release pipeline: enabled")
         log("Shared diagnostic privacy redaction: enabled")
         log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
@@ -133,10 +136,8 @@ class MainActivity : AppCompatActivity() {
         if (includeBeta != lastIncludeBetaSetting) {
             lastIncludeBetaSetting = includeBeta
             log("Beta/RC firmware lookup changed: ${if (includeBeta) "enabled" else "disabled"}")
-            val currentDevice = selected
-            if (currentDevice != null && identifiedDevice != null) {
-                worker.execute { identifyDeviceAndFirmware(currentDevice) }
-            }
+            clearFirmwareSelection("firmware channel preference changed")
+            updateFirmwareUi()
         }
 
         val granted = ensureSharedStorageAccess(openSettings = !sharedStorageSettingsOpened)
@@ -146,9 +147,6 @@ class MainActivity : AppCompatActivity() {
                 runCatching { firmwareStorage.prepare(device.identifier) }
                     .onSuccess { workspace ->
                         firmwareWorkspace = workspace
-                        latestSignedFirmware?.let { firmware ->
-                            firmwareDestination = firmwareStorage.locationFor(firmware).file
-                        }
                         updateFirmwareUi()
                     }
                     .onFailure { error -> log("Firmware storage setup failed after permission grant: ${error.message}") }
@@ -217,9 +215,8 @@ class MainActivity : AppCompatActivity() {
         if (preferred == null) {
             lastAutoProbeDeviceName = null
             identifiedDevice = null
-            latestSignedFirmware = null
+            clearFirmwareSelection("no Apple USB device", logChange = false)
             firmwareWorkspace = null
-            firmwareDestination = null
             binding.status.text = if (firmwareStorage.hasSharedStorageAccess()) {
                 "No Apple USB device found"
             } else {
@@ -399,7 +396,11 @@ class MainActivity : AppCompatActivity() {
                     return@onSuccess
                 }
 
+                val previousIdentifier = identifiedDevice?.identifier
                 identifiedDevice = catalogDevice
+                if (previousIdentifier != null && previousIdentifier != catalogDevice.identifier) {
+                    clearFirmwareSelection("identified device changed")
+                }
                 logUi(
                     "Identified device: ${catalogDevice.name} (${catalogDevice.identifier})" +
                         (catalogDevice.boardConfig?.let { " board=$it" } ?: "") +
@@ -425,10 +426,43 @@ class MainActivity : AppCompatActivity() {
                     if (selected?.deviceName == device.deviceName) {
                         binding.status.text = "${catalogDevice.name} (${catalogDevice.identifier}) — ${AppleUsb.mode(device)}"
                     }
+                    updateFirmwareUi()
                 }
-
-                lookupPreferredFirmware(catalogDevice.identifier)
+                logUi("Firmware selection waiting for user: tap Select signed firmware")
             }
+    }
+
+    private fun selectFirmwareManually() {
+        val device = identifiedDevice
+        if (device == null) {
+            log("Firmware selection unavailable: identify a connected device first")
+            updateFirmwareUi()
+            return
+        }
+        if (firmwareSelectionInFlight) {
+            log("Firmware selection already in progress")
+            return
+        }
+
+        firmwareSelectionInFlight = true
+        binding.selectFirmwareButton.isEnabled = false
+        binding.firmwareStatus.text = "Checking signed firmware catalog…"
+        log("Firmware selection requested by user for ${device.identifier}")
+        worker.execute {
+            try {
+                lookupPreferredFirmware(device.identifier)
+            } finally {
+                firmwareSelectionInFlight = false
+                runOnUiThread { updateFirmwareUi() }
+            }
+        }
+    }
+
+    private fun clearFirmwareSelection(reason: String, logChange: Boolean = true) {
+        val hadSelection = latestSignedFirmware != null || firmwareDestination != null
+        latestSignedFirmware = null
+        firmwareDestination = null
+        if (logChange && hadSelection) log("Firmware selection cleared: $reason")
     }
 
     private fun lookupPreferredFirmware(identifier: String) {
@@ -509,8 +543,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateFirmwareUi() {
         val firmware = latestSignedFirmware
         val destination = firmwareDestination
+        binding.selectFirmwareButton.isEnabled = identifiedDevice != null && !firmwareSelectionInFlight && !firmwareDownloadActive
+
         if (firmware == null || destination == null) {
-            binding.firmwareStatus.text = "Waiting for signed firmware selection"
+            binding.firmwareTitle.text = "Firmware"
+            binding.firmwareStatus.text = when {
+                firmwareSelectionInFlight -> "Checking signed firmware catalog…"
+                identifiedDevice != null -> "Device identified — tap Select signed firmware"
+                else -> "Waiting for device identification"
+            }
             binding.firmwareProgress.progress = 0
             binding.firmwareProgressText.text = ""
             binding.downloadFirmwareButton.isEnabled = false
@@ -529,6 +570,7 @@ class MainActivity : AppCompatActivity() {
         when {
             firmwareDownloadActive -> {
                 binding.firmwareStatus.text = "Downloading from Apple CDN"
+                binding.selectFirmwareButton.isEnabled = false
                 binding.downloadFirmwareButton.isEnabled = false
                 binding.cancelDownloadButton.isEnabled = true
             }
@@ -593,6 +635,7 @@ class MainActivity : AppCompatActivity() {
             .putExtra(FirmwareDownloadService.EXTRA_BUILD_ID, firmware.buildId)
 
         firmwareDownloadActive = true
+        binding.selectFirmwareButton.isEnabled = false
         binding.downloadFirmwareButton.isEnabled = false
         binding.cancelDownloadButton.isEnabled = true
         binding.firmwareStatus.text = "Starting Apple CDN download"
@@ -630,6 +673,7 @@ class MainActivity : AppCompatActivity() {
                     append(FirmwareDownloadService.formatBytes(total))
                     if (speed > 0L) append(" — ${FirmwareDownloadService.formatBytes(speed)}/s")
                 }
+                binding.selectFirmwareButton.isEnabled = false
                 binding.downloadFirmwareButton.isEnabled = false
                 binding.cancelDownloadButton.isEnabled = true
             }
@@ -673,6 +717,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("Shared storage access: ${if (firmwareStorage.hasSharedStorageAccess()) "granted" else "not granted"}")
             appendLine("Project root: ${firmwareStorage.projectRoot.absolutePath}")
             appendLine("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
+            appendLine("Firmware selection mode: manual")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Selected signed firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
