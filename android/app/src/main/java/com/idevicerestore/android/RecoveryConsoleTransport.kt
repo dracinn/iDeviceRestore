@@ -35,12 +35,12 @@ class RecoveryConsoleTransport private constructor(
         val output = ArrayList<Byte>()
         val buffer = ByteArray(4096)
 
-        repeat(maxReads) { index ->
+        for (index in 0 until maxReads) {
             val timeout = if (index == 0) firstTimeoutMs else 100
             val count = connection.bulkTransfer(endpoint, buffer, buffer.size, timeout)
-            if (count <= 0) return@repeat
+            if (count <= 0) break
             for (i in 0 until count) output += buffer[i]
-            if (count < buffer.size) return@repeat
+            if (count < buffer.size) break
         }
 
         val bytes = output.toByteArray()
