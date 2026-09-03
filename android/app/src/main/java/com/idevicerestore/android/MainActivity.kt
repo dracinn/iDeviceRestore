@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private var selected: UsbDevice? = null
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
+    private val probeLogBuffer = StringBuilder()
     private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
     private val betaFirmwareCatalog by lazy { BetaFirmwareCatalog(logger = { message -> logUi(message) }) }
     private val firmwareStorage by lazy { FirmwareStorage(this, logger = { message -> logUi(message) }) }
@@ -36,6 +37,8 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile
     private var probeInFlight = false
+    @Volatile
+    private var probeLogging = false
     private var lastAutoProbeDeviceName: String? = null
     private var identifiedDevice: FirmwareCatalog.Device? = null
     private var latestSignedFirmware: FirmwareCatalog.Firmware? = null
@@ -282,13 +285,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         probeInFlight = true
+        probeLogging = true
         binding.probeButton.isEnabled = false
         val source = if (manual) "manual" else "automatic"
-        log("Probe requested ($source): mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
+        probeLog("Probe requested ($source): mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
         worker.execute {
             val connection = usbManager.openDevice(device)
             if (connection == null) {
                 logUi("openDevice failed")
+                probeLogging = false
                 identifyDeviceAndFirmware(device)
                 finishProbe(device)
                 return@execute
@@ -337,6 +342,8 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 connection.close()
                 logUi("USB connection closed")
+                logUi("Probe finished")
+                probeLogging = false
                 identifyDeviceAndFirmware(device)
                 finishProbe(device)
             }
@@ -623,7 +630,7 @@ class MainActivity : AppCompatActivity() {
     private fun finishProbe(device: UsbDevice) = runOnUiThread {
         probeInFlight = false
         binding.probeButton.isEnabled = selected?.deviceName == device.deviceName && usbManager.hasPermission(device)
-        log("Probe finished")
+        log("Probe completed")
     }
 
     private fun shareLogs() {
@@ -648,7 +655,11 @@ class MainActivity : AppCompatActivity() {
             appendLine("Firmware download active: $firmwareDownloadActive")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
             appendLine("---")
+            appendLine("=== Activity Log ===")
             append(logBuffer.toString())
+            if (logBuffer.isNotEmpty() && logBuffer.last() != '\n') appendLine()
+            appendLine("=== Probe Log ===")
+            append(probeLogBuffer.toString())
         }
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
@@ -674,7 +685,18 @@ class MainActivity : AppCompatActivity() {
         binding.logView.append(clean + "\n")
     }
 
-    private fun logUi(message: String) = runOnUiThread { log(message) }
+    private fun probeLog(message: String) {
+        val clean = message.trimEnd()
+        probeLogBuffer.append(clean).append('\n')
+        binding.probeLogView.append(clean + "\n")
+    }
+
+    private fun logUi(message: String) {
+        val routeToProbe = probeLogging
+        runOnUiThread {
+            if (routeToProbe) probeLog(message) else log(message)
+        }
+    }
 
     companion object {
         private const val REQUEST_NOTIFICATIONS = 4108
