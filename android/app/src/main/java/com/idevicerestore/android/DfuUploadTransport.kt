@@ -29,7 +29,8 @@ class DfuUploadTransport(
     data class Result(
         val bytesSent: Long,
         val blocksSent: Int,
-        val finalState: Int
+        val finalState: Int,
+        val appleSuffixBytes: Int = APPLE_DFU_TRAILER_SIZE
     )
 
     init {
@@ -42,43 +43,84 @@ class DfuUploadTransport(
     ): Result = sendStream(ByteArrayInputStream(data), data.size.toLong(), onProgress)
 
     /**
-     * Sends exactly [length] bytes using DFU_DNLOAD blocks of 0x800 bytes.
+     * Sends exactly [length] payload bytes using libirecovery-compatible Apple DFU framing.
      *
-     * Each block is followed by DFU_GETSTATUS polling until the device reports dfuDNLOAD-IDLE.
-     * The terminating zero-length DNLOAD is deliberately not sent here; callers should only
-     * request manifestation as part of a validated boot-component transition.
+     * Normal Apple DFU uses 0x800-byte DFU_DNLOAD blocks. A CRC-32 accumulator starts at
+     * 0xFFFFFFFF and is updated over every payload byte, then over Apple's 12-byte DFU suffix.
+     * The resulting accumulator is appended little-endian as four bytes. There is deliberately
+     * no final XOR, matching libirecovery.
+     *
+     * If the final payload chunk has fewer than 16 free bytes in the 0x800-byte packet,
+     * libirecovery sends that payload chunk first and then sends the 16-byte suffix/CRC using
+     * the same DFU block number. This implementation preserves that behavior exactly.
+     *
+     * The terminating zero-length DFU_DNLOAD is not sent here. Call [finishManifestation] only
+     * after a validated personalized component has been uploaded and the caller is prepared for
+     * the device to reset/re-enumerate.
      */
     fun sendStream(
         input: InputStream,
         length: Long,
         onProgress: ((Progress) -> Unit)? = null
     ): Result {
-        require(length >= 0L) { "DFU upload length must be non-negative" }
-        if (length == 0L) return Result(0L, 0, readState())
+        require(length > 0L) { "Apple DFU upload length must be positive" }
+        require(length <= Int.MAX_VALUE.toLong() * DFU_PACKET_SIZE.toLong()) { "DFU upload is too large" }
 
         ensureDownloadReady()
 
-        val buffer = ByteArray(DFU_PACKET_SIZE)
-        var sent = 0L
-        var block = 0
+        val packetCount = ((length + DFU_PACKET_SIZE - 1L) / DFU_PACKET_SIZE.toLong()).toInt()
+        val payload = ByteArray(DFU_PACKET_SIZE)
+        var sentPayload = 0L
+        var crc = 0xFFFF_FFFFu
 
-        while (sent < length) {
-            val wanted = minOf(DFU_PACKET_SIZE.toLong(), length - sent).toInt()
-            readExactly(input, buffer, wanted)
-            dnload(block, buffer, wanted)
-            val status = waitForDownloadIdle()
-            sent += wanted.toLong()
-            block++
-            onProgress?.invoke(Progress(sent, length, block, status.state))
+        for (block in 0 until packetCount) {
+            val wanted = minOf(DFU_PACKET_SIZE.toLong(), length - sentPayload).toInt()
+            readExactly(input, payload, wanted)
+            for (i in 0 until wanted) {
+                crc = crc32Step(crc, payload[i])
+            }
+
+            val isLast = block == packetCount - 1
+            if (!isLast) {
+                dnload(block, payload, wanted)
+                val status = waitForDownloadIdle()
+                sentPayload += wanted.toLong()
+                onProgress?.invoke(Progress(sentPayload, length, block + 1, status.state))
+                continue
+            }
+
+            for (byte in APPLE_DFU_SUFFIX) {
+                crc = crc32Step(crc, byte)
+            }
+            val trailer = buildAppleTrailer(crc)
+
+            val status = if (wanted + trailer.size > DFU_PACKET_SIZE) {
+                // libirecovery sends the full final payload block and then the 16-byte trailer
+                // using the same wValue/block number before polling GETSTATUS.
+                dnload(block, payload, wanted)
+                dnload(block, trailer, trailer.size)
+                waitForDownloadIdle()
+            } else {
+                val framed = ByteArray(wanted + trailer.size)
+                System.arraycopy(payload, 0, framed, 0, wanted)
+                System.arraycopy(trailer, 0, framed, wanted, trailer.size)
+                dnload(block, framed, framed.size)
+                waitForDownloadIdle()
+            }
+
+            sentPayload += wanted.toLong()
+            onProgress?.invoke(Progress(sentPayload, length, block + 1, status.state))
         }
 
-        return Result(sent, block, readState())
+        return Result(sentPayload, packetCount, readState())
     }
 
     /**
-     * Sends the zero-length DFU_DNLOAD request that ends the transfer and begins manifestation.
-     * This is state-changing and should only be called after the correct personalized image has
-     * been uploaded and the restore coordinator is prepared for USB re-enumeration.
+     * Sends the zero-length DFU_DNLOAD request used by IRECV_SEND_OPT_DFU_NOTIFY_FINISH.
+     * For a [Result] returned from [sendStream], pass result.blocksSent as [block].
+     *
+     * This is state-changing and should only be called when the restore coordinator expects the
+     * uploaded personalized image to manifest and the USB device to reset/re-enumerate.
      */
     fun finishManifestation(block: Int): Int {
         require(block in 0..0xFFFF) { "DFU block number out of range" }
@@ -241,8 +283,35 @@ class DfuUploadTransport(
         }
     }
 
+    private fun buildAppleTrailer(crc: UInt): ByteArray {
+        val trailer = ByteArray(APPLE_DFU_TRAILER_SIZE)
+        System.arraycopy(APPLE_DFU_SUFFIX, 0, trailer, 0, APPLE_DFU_SUFFIX.size)
+        trailer[12] = (crc and 0xFFu).toByte()
+        trailer[13] = ((crc shr 8) and 0xFFu).toByte()
+        trailer[14] = ((crc shr 16) and 0xFFu).toByte()
+        trailer[15] = ((crc shr 24) and 0xFFu).toByte()
+        return trailer
+    }
+
+    /** Bitwise equivalent of libirecovery's crc32_lookup_t1 step (polynomial 0xEDB88320). */
+    private fun crc32Step(current: UInt, byte: Byte): UInt {
+        var crc = current xor (byte.toUInt() and 0xFFu)
+        repeat(8) {
+            crc = if ((crc and 1u) != 0u) (crc shr 1) xor CRC32_POLYNOMIAL else crc shr 1
+        }
+        return crc
+    }
+
     companion object {
         const val DFU_PACKET_SIZE = 0x800
+        const val APPLE_DFU_TRAILER_SIZE = 16
+
+        private val APPLE_DFU_SUFFIX = byteArrayOf(
+            0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(),
+            0xAC.toByte(), 0x05, 0x00, 0x01,
+            0x55, 0x46, 0x44, 0x10
+        )
+        private val CRC32_POLYNOMIAL = 0xEDB88320u
 
         private const val DFU_REQUEST_TYPE_OUT = 0x21
         private const val DFU_REQUEST_TYPE_IN = 0xA1
