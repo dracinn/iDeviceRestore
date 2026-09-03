@@ -49,22 +49,71 @@ object AppleUsb {
         }
     }
 
-    data class Claimed(val intf: UsbInterface, val bulkIn: UsbEndpoint?)
+    data class Claimed(
+        val intf: UsbInterface,
+        val bulkIn: UsbEndpoint?,
+        val bulkOut: UsbEndpoint?
+    )
+
+    private data class Candidate(
+        val intf: UsbInterface,
+        val bulkIn: UsbEndpoint?,
+        val bulkOut: UsbEndpoint?,
+        val score: Int
+    )
 
     fun claimBestInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
+        val candidates = mutableListOf<Candidate>()
+        val deviceMode = mode(device)
+
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
-            if (!connection.claimInterface(intf, true)) continue
             var bulkIn: UsbEndpoint? = null
+            var bulkOut: UsbEndpoint? = null
+
             for (e in 0 until intf.endpointCount) {
                 val ep = intf.getEndpoint(e)
-                if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK && ep.direction == UsbConstants.USB_DIR_IN) {
-                    bulkIn = ep
-                    break
+                if (ep.type != UsbConstants.USB_ENDPOINT_XFER_BULK) continue
+                when (ep.direction) {
+                    UsbConstants.USB_DIR_IN -> if (bulkIn == null) bulkIn = ep
+                    UsbConstants.USB_DIR_OUT -> if (bulkOut == null) bulkOut = ep
                 }
             }
-            return Claimed(intf, bulkIn)
+
+            val score = when (deviceMode) {
+                Mode.RECOVERY, Mode.WTF -> {
+                    var s = 0
+                    if (bulkIn != null) s += 100
+                    if (bulkOut != null) s += 50
+                    if (bulkIn != null && bulkOut != null) s += 100
+                    if (intf.interfaceClass == 255) s += 10
+                    if (intf.endpointCount >= 2) s += 5
+                    s
+                }
+                Mode.DFU -> {
+                    var s = 0
+                    if (intf.interfaceClass == 254) s += 100
+                    if (intf.interfaceSubclass == 1) s += 50
+                    if (intf.endpointCount == 0) s += 10
+                    s
+                }
+                Mode.APPLE_OTHER -> {
+                    var s = 0
+                    if (bulkIn != null) s += 20
+                    if (bulkOut != null) s += 10
+                    s
+                }
+            }
+
+            candidates += Candidate(intf, bulkIn, bulkOut, score)
         }
+
+        for (candidate in candidates.sortedByDescending { it.score }) {
+            if (connection.claimInterface(candidate.intf, true)) {
+                return Claimed(candidate.intf, candidate.bulkIn, candidate.bulkOut)
+            }
+        }
+
         return null
     }
 }
