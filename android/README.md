@@ -14,6 +14,70 @@ The first milestone intentionally avoids native `libusb`: Android owns USB permi
 - DFU: issue `DFU_GETSTATUS` only
 - Recovery/iBoot: send `getenv build-version` and attempt to read the response
 - On-device diagnostic logging
+- Firmware catalog client for IPSW metadata
+- Signed/unsigned firmware filtering by Apple device identifier
+- Apple-hosted IPSW URL, version, build, size, release date and SHA-1 metadata
+- Resumable HTTPS firmware downloads
+- Multi-connection ranged downloads when the server supports byte ranges
+- Retry with exponential backoff, cancellation and progress callbacks
+- IPSW size and SHA-1 verification before finalizing a download
+
+## Firmware catalog
+
+`FirmwareCatalog.kt` follows the same high-level firmware model used by Mist. It obtains firmware metadata from the IPSW Downloads API (`api.ipsw.me`), which Mist also credits for firmware metadata, then exposes the Apple-hosted IPSW URL and verification fields to the Android restore stack.
+
+Typical use:
+
+```kotlin
+val catalog = FirmwareCatalog(logger = ::log)
+val latest = catalog.latestSigned("iPhone15,2")
+```
+
+The catalog supports:
+
+- listing known Apple device identifiers
+- listing all IPSWs for a device
+- filtering to currently signed firmware
+- finding the newest signed entry
+- exporting a device firmware list to JSON for diagnostics/offline caching
+
+Remote metadata must not be treated as trusted restore policy. Before a restore, the app should still verify the target identity against the connected device and obtain the required Apple signing/personalization response.
+
+## Firmware downloader
+
+`FirmwareDownloader.kt` is inspired by aria2's HTTP transfer behavior without embedding an external command-line binary. The downloader is usable by later restore-state code and can also be wrapped by an Android foreground service when background download UX is added.
+
+```kotlin
+val firmware = catalog.latestSigned("iPhone15,2") ?: error("No signed firmware")
+val request = FirmwareDownloader.Request(
+    url = firmware.url,
+    destination = File(filesDir, firmware.fileName),
+    expectedSize = firmware.fileSize,
+    expectedSha1 = firmware.sha1,
+    connections = 4
+)
+
+val handle = FirmwareDownloader(logger = ::log).start(request) { progress ->
+    log("IPSW ${progress.downloadedBytes}/${progress.totalBytes} ${progress.bytesPerSecond} B/s")
+}
+
+// handle.cancel() can stop the transfer. Partial segment files are retained for resume.
+```
+
+Transfer behavior:
+
+- HTTPS only
+- HEAD/range probing before transfer
+- up to 16 ranged connections
+- partial segment retention and resume
+- sequential fallback when ranges are unavailable
+- exponential retry backoff
+- progress/speed callbacks
+- cancellation
+- assembled file-size validation
+- SHA-1 verification before atomic-ish finalization to the requested destination
+
+The implementation deliberately keeps storage separate from transfer logic. A later UI can download to app-private storage directly or adapt a user-selected Storage Access Framework destination without coupling restore logic to an Activity.
 
 ## Phone-only development with GitHub Actions
 
@@ -87,10 +151,13 @@ GitHub Actions can compile and package the app, but hosted runners cannot physic
 
 The Android port will therefore evolve toward an `irecv`-compatible Android transport/JNI layer rather than forcing desktop-style USB ownership into the app.
 
+The firmware layer now has two reusable pieces: catalog discovery and verified/resumable transfer. The next restore milestones can consume those without putting network logic into the USB transports.
+
 ## Roadmap
 
 - M1: USB discovery + DFU_GETSTATUS + recovery query
 - M2: `irecv`-compatible transport/JNI + ECID/CPID/BDID + hotplug lifecycle
-- M3: controlled iBSS/iBEC transfer with progress reporting on dedicated test hardware
-- M4: restore-mode usbmuxd/mobiledevice transport
-- M5: IPSW parsing, TSS, personalization and complete restore state machine
+- M3: firmware catalog UI + download manager/foreground-service integration
+- M4: controlled iBSS/iBEC extraction and transfer with progress reporting on dedicated test hardware
+- M5: restore-mode usbmuxd/mobiledevice transport
+- M6: IPSW parsing, TSS, personalization and complete restore state machine
