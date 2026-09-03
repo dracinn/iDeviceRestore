@@ -23,6 +23,15 @@ class BetaFirmwareCatalog(
     private val readTimeoutMs: Int = 30_000,
     private val logger: (String) -> Unit = {}
 ) {
+    data class Candidate(
+        val version: String,
+        val buildId: String,
+        val releaseDateText: String,
+        val fileSizeText: String,
+        val releaseDate: Instant?,
+        val fileSize: Long
+    )
+
     private data class ParsedRow(
         val version: String,
         val buildId: String,
@@ -31,7 +40,7 @@ class BetaFirmwareCatalog(
         val signed: Boolean
     )
 
-    fun latestSigned(identifier: String): FirmwareCatalog.Firmware? {
+    fun signedCandidates(identifier: String): List<Candidate> {
         require(identifier.matches(Regex("[A-Za-z0-9,._-]+"))) { "Invalid device identifier" }
         val encoded = URLEncoder.encode(identifier, StandardCharsets.UTF_8)
         val indexUrl = "$endpoint/$encoded"
@@ -44,64 +53,76 @@ class BetaFirmwareCatalog(
         logger("BetaFirmwareCatalog: parsed ${rows.size} candidate row(s); ${signedRows.size} reported signed")
         if (rows.isEmpty()) error("No beta/RC firmware rows could be parsed for device")
 
-        for (row in signedRows.take(MAX_DETAIL_PROBES)) {
-            logger(
-                "BetaFirmwareCatalog: signed candidate ${row.version} (${row.buildId}) " +
-                    "released=${row.releaseDateText} size=${row.fileSizeText}"
-            )
-
-            val detailUrl = "$endpoint/download/$encoded/${row.buildId}"
-            logger("BetaFirmwareCatalog: GET $detailUrl")
-            val detail = get(detailUrl)
-            logger("BetaFirmwareCatalog: received ${detail.length} detail characters; resolving Apple CDN URL")
-
-            val appleUrl = Regex("https://updates\\.cdn-apple\\.com/[^\"'<>\\s]+", RegexOption.IGNORE_CASE)
-                .find(detail)?.value
-            if (appleUrl == null) {
-                logger("BetaFirmwareCatalog: signed build ${row.buildId} has no Apple CDN URL; checking next candidate")
-                continue
-            }
-
-            val parsedUrl = URL(appleUrl)
-            if (!parsedUrl.protocol.equals("https", ignoreCase = true) ||
-                !parsedUrl.host.equals(APPLE_CDN_HOST, ignoreCase = true)
-            ) {
-                logger("BetaFirmwareCatalog: rejected non-Apple firmware URL for ${row.buildId}")
-                continue
-            }
-
-            val displayedSize = parseSize(row.fileSizeText)
-            val exactSize = probeAppleContentLength(appleUrl)
-            val firmwareSize = if (exactSize > 0L) exactSize else displayedSize
-            if (exactSize > 0L) {
-                logger("BetaFirmwareCatalog: Apple CDN exact payload size=$exactSize bytes")
-            } else {
-                logger("BetaFirmwareCatalog: Apple CDN size probe unavailable; using rounded index size=$displayedSize bytes")
-            }
-
-            logger("BetaFirmwareCatalog: selected ${row.buildId}; payload host=$APPLE_CDN_HOST")
-            return FirmwareCatalog.Firmware(
-                identifier = identifier,
+        return signedRows.map { row ->
+            Candidate(
                 version = row.version,
                 buildId = row.buildId,
-                url = appleUrl,
-                fileSize = firmwareSize,
-                sha1 = null,
+                releaseDateText = row.releaseDateText,
+                fileSizeText = row.fileSizeText,
                 releaseDate = parseDate(row.releaseDateText),
-                uploadDate = null,
-                signed = true
+                fileSize = parseSize(row.fileSizeText)
             )
         }
+    }
 
+    fun resolveSigned(identifier: String, candidate: Candidate): FirmwareCatalog.Firmware? {
+        require(identifier.matches(Regex("[A-Za-z0-9,._-]+"))) { "Invalid device identifier" }
+        val encoded = URLEncoder.encode(identifier, StandardCharsets.UTF_8)
+        logger(
+            "BetaFirmwareCatalog: resolving signed candidate ${candidate.version} " +
+                "(${candidate.buildId}) released=${candidate.releaseDateText} size=${candidate.fileSizeText}"
+        )
+
+        val detailUrl = "$endpoint/download/$encoded/${candidate.buildId}"
+        logger("BetaFirmwareCatalog: GET $detailUrl")
+        val detail = get(detailUrl)
+        logger("BetaFirmwareCatalog: received ${detail.length} detail characters; resolving Apple CDN URL")
+
+        val appleUrl = Regex("https://updates\\.cdn-apple\\.com/[^\"'<>\\s]+", RegexOption.IGNORE_CASE)
+            .find(detail)?.value
+        if (appleUrl == null) {
+            logger("BetaFirmwareCatalog: signed build ${candidate.buildId} has no Apple CDN URL")
+            return null
+        }
+
+        val parsedUrl = URL(appleUrl)
+        if (!parsedUrl.protocol.equals("https", ignoreCase = true) ||
+            !parsedUrl.host.equals(APPLE_CDN_HOST, ignoreCase = true)
+        ) {
+            logger("BetaFirmwareCatalog: rejected non-Apple firmware URL for ${candidate.buildId}")
+            return null
+        }
+
+        val exactSize = probeAppleContentLength(appleUrl)
+        val firmwareSize = if (exactSize > 0L) exactSize else candidate.fileSize
+        if (exactSize > 0L) {
+            logger("BetaFirmwareCatalog: Apple CDN exact payload size=$exactSize bytes")
+        } else {
+            logger("BetaFirmwareCatalog: Apple CDN size probe unavailable; using rounded index size=${candidate.fileSize} bytes")
+        }
+
+        logger("BetaFirmwareCatalog: selected ${candidate.buildId}; payload host=$APPLE_CDN_HOST")
+        return FirmwareCatalog.Firmware(
+            identifier = identifier,
+            version = candidate.version,
+            buildId = candidate.buildId,
+            url = appleUrl,
+            fileSize = firmwareSize,
+            sha1 = null,
+            releaseDate = candidate.releaseDate,
+            uploadDate = null,
+            signed = true
+        )
+    }
+
+    fun latestSigned(identifier: String): FirmwareCatalog.Firmware? {
+        for (candidate in signedCandidates(identifier).take(MAX_DETAIL_PROBES)) {
+            resolveSigned(identifier, candidate)?.let { return it }
+        }
         logger("BetaFirmwareCatalog: no signed beta/RC with an Apple CDN URL found in first $MAX_DETAIL_PROBES signed candidates")
         return null
     }
 
-    /**
-     * Parse version/build/date/size from bounded plain-text windows, then recover signing state from
-     * the raw table row containing each build ID. This avoids both page-wide regex backtracking and
-     * brittle dependence on a particular detail-page sentence.
-     */
     private fun parseRows(html: String): List<ParsedRow> {
         val text = html
             .replace(Regex("(?is)<script\\b[^>]*>.*?</script>"), " ")
@@ -191,7 +212,6 @@ class BetaFirmwareCatalog(
         ).any { normalized.contains(it) }
     }
 
-    /** Ask Apple's CDN for the exact payload size without downloading the IPSW. */
     private fun probeAppleContentLength(target: String): Long {
         val head = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "HEAD"
