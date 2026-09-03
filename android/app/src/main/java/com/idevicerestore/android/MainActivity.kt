@@ -7,8 +7,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import com.idevicerestore.android.databinding.ActivityMainBinding
 import java.io.File
@@ -24,7 +27,7 @@ class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
     private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
-    private val firmwareStorage by lazy { FirmwareStorage(this) }
+    private val firmwareStorage by lazy { FirmwareStorage(this, logger = { message -> logUi(message) }) }
 
     @Volatile
     private var probeInFlight = false
@@ -33,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private var latestSignedFirmware: FirmwareCatalog.Firmware? = null
     private var firmwareWorkspace: FirmwareStorage.Workspace? = null
     private var firmwareDestination: File? = null
+    private var sharedStorageSettingsOpened = false
+    private var sharedStorageAccessLogged = false
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -95,13 +100,74 @@ class MainActivity : AppCompatActivity() {
         log("Automatic DFU / Recovery probing: enabled")
         log("Automatic pseudo-release pipeline: enabled")
         log("Shared diagnostic privacy redaction: enabled")
+        log("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
+        ensureSharedStorageAccess(openSettings = true)
         scan()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!::binding.isInitialized) return
+        val granted = ensureSharedStorageAccess(openSettings = !sharedStorageSettingsOpened)
+        if (granted && sharedStorageSettingsOpened) {
+            sharedStorageSettingsOpened = false
+            identifiedDevice?.let { device ->
+                runCatching { firmwareStorage.prepare(device.identifier) }
+                    .onSuccess { workspace ->
+                        firmwareWorkspace = workspace
+                        latestSignedFirmware?.let { firmware ->
+                            firmwareDestination = firmwareStorage.locationFor(firmware).file
+                        }
+                    }
+                    .onFailure { error -> log("Firmware storage setup failed after permission grant: ${error.message}") }
+            }
+        }
     }
 
     override fun onDestroy() {
         unregisterReceiver(receiver)
         worker.shutdownNow()
         super.onDestroy()
+    }
+
+    private fun ensureSharedStorageAccess(openSettings: Boolean): Boolean {
+        if (firmwareStorage.hasSharedStorageAccess()) {
+            if (!sharedStorageAccessLogged) {
+                sharedStorageAccessLogged = true
+                log("Shared storage access: granted")
+                log("Using existing iDeviceRestore folder: ${firmwareStorage.projectRoot.absolutePath}")
+            }
+            return true
+        }
+
+        sharedStorageAccessLogged = false
+        log("Shared storage access: required for ${firmwareStorage.projectRoot.absolutePath}")
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            log("Shared storage permission must be granted in Android app permissions")
+            return false
+        }
+        if (!openSettings) return false
+
+        val appIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+        val launched = runCatching {
+            startActivity(appIntent)
+            true
+        }.getOrElse {
+            runCatching {
+                startActivity(fallbackIntent)
+                true
+            }.getOrDefault(false)
+        }
+        if (launched) {
+            sharedStorageSettingsOpened = true
+            log("Opened Android 'All files access' settings for iDeviceRestore")
+        } else {
+            log("Could not open Android 'All files access' settings")
+        }
+        return false
     }
 
     private fun scan() {
@@ -120,7 +186,11 @@ class MainActivity : AppCompatActivity() {
             latestSignedFirmware = null
             firmwareWorkspace = null
             firmwareDestination = null
-            binding.status.text = "No Apple USB device found"
+            binding.status.text = if (firmwareStorage.hasSharedStorageAccess()) {
+                "No Apple USB device found"
+            } else {
+                "Storage access required — enable All files access"
+            }
             binding.probeButton.isEnabled = false
             return
         }
@@ -268,15 +338,20 @@ class MainActivity : AppCompatActivity() {
                         (catalogDevice.platform?.let { " platform=$it" } ?: "")
                 )
 
-                runCatching { firmwareStorage.prepare(catalogDevice.identifier) }
-                    .onFailure { error ->
-                        logUi("Firmware storage setup failed: ${error.javaClass.simpleName}: ${error.message}")
-                    }
-                    .onSuccess { workspace ->
-                        firmwareWorkspace = workspace
-                        logUi("Firmware storage root: ${workspace.root.absolutePath}")
-                        logUi("Device firmware directory: ${workspace.firmware.absolutePath}")
-                    }
+                if (!firmwareStorage.hasSharedStorageAccess()) {
+                    logUi("Firmware storage unavailable until All files access is granted")
+                    runOnUiThread { ensureSharedStorageAccess(openSettings = true) }
+                } else {
+                    runCatching { firmwareStorage.prepare(catalogDevice.identifier) }
+                        .onFailure { error ->
+                            logUi("Firmware storage setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                        }
+                        .onSuccess { workspace ->
+                            firmwareWorkspace = workspace
+                            logUi("Firmware storage root: ${workspace.root.absolutePath}")
+                            logUi("Device firmware directory: ${workspace.firmware.absolutePath}")
+                        }
+                }
 
                 runOnUiThread {
                     if (selected?.deviceName == device.deviceName) {
@@ -298,14 +373,18 @@ class MainActivity : AppCompatActivity() {
                             logUi("Latest signed firmware: ${firmware.version} (${firmware.buildId})$size")
                             logUi("Latest signed firmware URL: ${firmware.url}")
 
-                            firmwareWorkspace?.let { workspace ->
-                                val fallback = "${catalogDevice.identifier}_${firmware.version}_${firmware.buildId}.ipsw"
-                                    .replace(Regex("[^A-Za-z0-9,._-]"), "_")
-                                val fileName = firmware.url.substringAfterLast('/').substringBefore('?')
-                                    .takeIf { it.endsWith(".ipsw", ignoreCase = true) && it.isNotBlank() }
-                                    ?: fallback
-                                firmwareDestination = File(workspace.firmware, fileName)
-                                logUi("Firmware download destination: ${firmwareDestination?.absolutePath}")
+                            if (firmwareStorage.hasSharedStorageAccess()) {
+                                runCatching { firmwareStorage.locationFor(firmware) }
+                                    .onSuccess { location ->
+                                        firmwareWorkspace = location.workspace
+                                        firmwareDestination = location.file
+                                        logUi("Firmware download destination: ${location.file.absolutePath}")
+                                    }
+                                    .onFailure { error ->
+                                        logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                                    }
+                            } else {
+                                logUi("Firmware destination pending shared storage permission")
                             }
                         }
                     }
@@ -326,9 +405,12 @@ class MainActivity : AppCompatActivity() {
             appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
             appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("Shared storage access: ${if (firmwareStorage.hasSharedStorageAccess()) "granted" else "not granted"}")
+            appendLine("Project root: ${firmwareStorage.projectRoot.absolutePath}")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Latest signed firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
+            firmwareDestination?.let { appendLine("Firmware destination: ${it.absolutePath}") }
             appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
             appendLine("---")
             append(logBuffer.toString())
