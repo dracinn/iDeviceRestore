@@ -6,7 +6,13 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 
-/** Minimal, non-destructive iBoot/recovery transport modeled after libirecovery. */
+/**
+ * iBoot/recovery USB transport modeled after libirecovery.
+ *
+ * This class intentionally keeps transport primitives separate from restore policy. Safe command
+ * and read helpers live here; higher-level code decides when potentially state-changing commands
+ * such as `go`, `reset`, image execution, or environment mutation are appropriate.
+ */
 class RecoveryTransport(
     private val connection: UsbDeviceConnection,
     private val bulkIn: UsbEndpoint?
@@ -30,11 +36,34 @@ class RecoveryTransport(
         val value: String
     )
 
-    /** Mirrors libirecovery's vendor control-OUT command transport. */
-    fun sendCommand(command: String, request: Int = 0): Int {
+    data class ControlTransferResult(
+        val requestType: Int,
+        val request: Int,
+        val value: Int,
+        val index: Int,
+        val transferred: Int
+    )
+
+    /** Mirrors libirecovery's standard irecv_send_command() vendor control-OUT transport. */
+    fun sendCommand(command: String): Int = sendCommandInternal(command, IRECV_DEFAULT_COMMAND_REQUEST)
+
+    /**
+     * Mirrors libirecovery's irecv_send_command_breq().
+     *
+     * Apple Silicon restore flows use this for special iBoot commands (notably the M1 iBEC `go`
+     * transition with bRequest=1). This primitive does not choose commands on its own.
+     */
+    fun sendCommandBreq(command: String, request: Int): Int {
+        require(request in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
+        return sendCommandInternal(command, request)
+    }
+
+    private fun sendCommandInternal(command: String, request: Int): Int {
         require(command.none { it == '\u0000' }) { "Recovery command contains NUL" }
         val commandData = command.toByteArray(StandardCharsets.US_ASCII)
         require(commandData.size < 0x100) { "Recovery command must be shorter than 256 bytes" }
+
+        // libirecovery sends strlen(command)+1, including the trailing NUL byte.
         val bytes = ByteArray(commandData.size + 1)
         commandData.copyInto(bytes)
 
@@ -55,7 +84,8 @@ class RecoveryTransport(
     }
 
     /** Reads the vendor control-IN response used by iBoot command helpers such as getenv. */
-    fun readControlResponse(request: Int = 0, maxBytes: Int = 255): ByteArray {
+    fun readControlResponse(request: Int = IRECV_DEFAULT_COMMAND_REQUEST, maxBytes: Int = 255): ByteArray {
+        require(request in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
         require(maxBytes in 1..0xFFFF) { "maxBytes must be between 1 and 65535" }
         val response = ByteArray(maxBytes)
         val received = connection.controlTransfer(
@@ -74,18 +104,18 @@ class RecoveryTransport(
     /** Performs one vendor control-OUT command followed by its vendor control-IN response. */
     fun exchangeCommand(
         command: String,
-        outRequest: Int = 0,
-        inRequest: Int = 0,
+        outRequest: Int = IRECV_DEFAULT_COMMAND_REQUEST,
+        inRequest: Int = IRECV_DEFAULT_COMMAND_REQUEST,
         maxResponseBytes: Int = 255
     ): CommandResponse {
-        val commandBytes = sendCommand(command, outRequest)
+        val commandBytes = sendCommandBreq(command, outRequest)
         val response = readControlResponse(inRequest, maxResponseBytes)
         return CommandResponse(commandBytes, response.size, response)
     }
 
     /**
-     * Mirrors libirecovery's irecv_getenv(): send `getenv <variable>` using a
-     * vendor OUT control transfer, then read the value using vendor IN 0xC0.
+     * Mirrors libirecovery's irecv_getenv(): send `getenv <variable>` and read the returned value.
+     * This helper is read-only with respect to iBoot environment state.
      */
     fun getenv(variable: String): GetEnvResult {
         require(variable.isNotBlank()) { "Environment variable cannot be blank" }
@@ -94,6 +124,46 @@ class RecoveryTransport(
 
         val result = exchangeCommand("getenv $variable")
         return GetEnvResult(result.commandBytes, result.responseBytes, result.utf8())
+    }
+
+    /**
+     * Low-level USB control transfer primitive equivalent to libirecovery's
+     * irecv_usb_control_transfer(). It exists for protocol steps that are not iBoot text commands.
+     */
+    fun controlTransferOut(
+        requestType: Int,
+        request: Int,
+        value: Int = 0,
+        index: Int = 0,
+        data: ByteArray? = null,
+        timeoutMs: Int = USB_TIMEOUT_MS
+    ): ControlTransferResult {
+        require(requestType in 0..0xFF) { "requestType must be between 0 and 255" }
+        require(request in 0..0xFF) { "request must be between 0 and 255" }
+        require(value in 0..0xFFFF) { "value must be between 0 and 65535" }
+        require(index in 0..0xFFFF) { "index must be between 0 and 65535" }
+        require(timeoutMs >= 0) { "timeoutMs must be non-negative" }
+        require(requestType and 0x80 == 0) { "controlTransferOut requires a host-to-device request type" }
+
+        val transferred = connection.controlTransfer(
+            requestType,
+            request,
+            value,
+            index,
+            data,
+            data?.size ?: 0,
+            timeoutMs
+        )
+        if (transferred < 0) {
+            throw IOException(
+                "Recovery control-OUT failed: type=0x%02X request=0x%02X result=%d"
+                    .format(requestType, request, transferred)
+            )
+        }
+        if (data != null && transferred != data.size) {
+            throw IOException("Recovery control-OUT short write: expected ${data.size}, got $transferred")
+        }
+        return ControlTransferResult(requestType, request, value, index, transferred)
     }
 
     /** Optional console diagnostic; getenv responses do not use this path. */
@@ -119,6 +189,9 @@ class RecoveryTransport(
     }
 
     companion object {
+        const val APPLE_SILICON_GO_BREQUEST = 1
+
+        private const val IRECV_DEFAULT_COMMAND_REQUEST = 0
         private const val RECOVERY_REQUEST_TYPE_OUT = 0x40
         private const val RECOVERY_REQUEST_TYPE_IN = 0xC0
         private const val USB_TIMEOUT_MS = 10_000
