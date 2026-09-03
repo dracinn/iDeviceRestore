@@ -3,7 +3,7 @@ name: Android CI
 on:
   push:
     branches:
-      - android-ci
+      - master
     paths:
       - 'android/**'
       - '.github/workflows/android-ci.yml'
