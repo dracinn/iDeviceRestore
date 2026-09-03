@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
     private val betaFirmwareCatalog by lazy { BetaFirmwareCatalog(logger = { message -> logUi(message) }) }
     private val firmwareStorage by lazy { FirmwareStorage(this, logger = { message -> logUi(message) }) }
+    private val firmwareMetadataCache by lazy { FirmwareMetadataCache(logger = { message -> logUi(message) }) }
     private val appSettings by lazy { AppSettings(this) }
 
     @Volatile
@@ -119,6 +120,8 @@ class MainActivity : AppCompatActivity() {
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         log("Automatic DFU / Recovery probing: enabled")
         log("Firmware selection: manual catalog choice required each app session")
+        log("Firmware metadata: persistent cache with current-index refresh")
+        log("Firmware activation: fresh signing and Apple CDN verification required")
         log("Automatic pseudo-release pipeline: enabled")
         log("Shared diagnostic privacy redaction: enabled")
         log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
@@ -420,6 +423,9 @@ class MainActivity : AppCompatActivity() {
                             firmwareWorkspace = workspace
                             logUi("Firmware storage root: ${workspace.root.absolutePath}")
                             logUi("Device firmware directory: ${workspace.firmware.absolutePath}")
+                            val cacheFile = firmwareStorage.catalogCacheFor(catalogDevice.identifier)
+                            val cachedCount = firmwareMetadataCache.load(cacheFile).size
+                            logUi("Firmware metadata cache: $cachedCount build(s) at ${cacheFile.absolutePath}")
                         }
                 }
 
@@ -447,7 +453,7 @@ class MainActivity : AppCompatActivity() {
 
         firmwareSelectionInFlight = true
         binding.selectFirmwareButton.isEnabled = false
-        binding.firmwareStatus.text = "Loading signed firmware catalog…"
+        binding.firmwareStatus.text = "Refreshing firmware index…"
         log("Firmware catalog chooser requested by user for ${device.identifier}")
         worker.execute {
             val choices = loadFirmwareChoices(device.identifier)
@@ -457,7 +463,7 @@ class MainActivity : AppCompatActivity() {
                 if (identifiedDevice?.identifier != device.identifier) {
                     log("Firmware chooser discarded: connected device changed")
                 } else if (choices.isEmpty()) {
-                    log("Firmware catalog chooser: no signed firmware entries available")
+                    log("Firmware catalog chooser: no currently signed firmware entries available")
                     binding.firmwareStatus.text = "No signed firmware reported"
                 } else {
                     showFirmwareChooser(device.identifier, choices)
@@ -467,52 +473,92 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadFirmwareChoices(identifier: String): List<FirmwareSelectionCandidate> {
-        logUi("Firmware catalog: loading all signed stable IPSWs for $identifier")
+        val cacheFile = runCatching { firmwareStorage.catalogCacheFor(identifier) }
+            .onFailure { logUi("Firmware metadata cache unavailable: ${it.message}") }
+            .getOrNull()
+        val cached = cacheFile?.let { firmwareMetadataCache.load(it) }.orEmpty()
+        logUi("Firmware metadata cache: loaded ${cached.size} known build(s)")
+        logUi("Firmware catalog refresh: probing current indexes for newly published/signing changes")
+
+        val currentEntries = mutableListOf<FirmwareMetadataCache.Entry>()
+        val refreshedChannels = mutableSetOf(FirmwareSelectionCandidate.Channel.STABLE)
+
         val stable = runCatching { firmwareCatalog.firmwares(identifier, signedOnly = true) }
             .onFailure { error ->
-                logUi("Signed stable firmware list failed: ${error.javaClass.simpleName}: ${error.message}")
+                logUi("Signed stable firmware index refresh failed: ${error.javaClass.simpleName}: ${error.message}")
             }
             .getOrDefault(emptyList())
-        logUi("Firmware catalog: ${stable.size} signed stable build(s) available")
-
-        val choices = mutableListOf<FirmwareSelectionCandidate>()
         stable.forEach { firmware ->
-            choices += FirmwareSelectionCandidate(
+            currentEntries += FirmwareMetadataCache.Entry(
                 channel = FirmwareSelectionCandidate.Channel.STABLE,
                 version = firmware.version,
                 buildId = firmware.buildId,
                 releaseDate = firmware.releaseDate,
                 fileSize = firmware.fileSize,
-                stableFirmware = firmware
+                url = firmware.url,
+                sha1 = firmware.sha1,
+                currentlySigned = true,
+                verifiedAt = null
             )
         }
+        logUi("Firmware catalog refresh: ${stable.size} stable build(s) currently signed")
 
         if (appSettings.includeBetaFirmware) {
-            logUi("Beta/RC catalog: loading all signed candidates for $identifier")
+            refreshedChannels += FirmwareSelectionCandidate.Channel.BETA
+            refreshedChannels += FirmwareSelectionCandidate.Channel.RC
             val betaCandidates = runCatching { betaFirmwareCatalog.signedCandidates(identifier) }
                 .onFailure { error ->
-                    logUi("Beta/RC firmware list failed: ${error.javaClass.simpleName}: ${error.message}")
+                    logUi("Beta/RC firmware index refresh failed: ${error.javaClass.simpleName}: ${error.message}")
                 }
                 .getOrDefault(emptyList())
-            logUi("Beta/RC catalog: ${betaCandidates.size} signed beta/RC build(s) available")
             betaCandidates.forEach { candidate ->
                 val channel = if (candidate.version.contains("RC", ignoreCase = true)) {
                     FirmwareSelectionCandidate.Channel.RC
                 } else {
                     FirmwareSelectionCandidate.Channel.BETA
                 }
-                choices += FirmwareSelectionCandidate(
+                currentEntries += FirmwareMetadataCache.Entry(
                     channel = channel,
                     version = candidate.version,
                     buildId = candidate.buildId,
                     releaseDate = candidate.releaseDate,
                     fileSize = candidate.fileSize,
-                    betaCandidate = candidate
+                    url = null,
+                    sha1 = null,
+                    currentlySigned = true,
+                    verifiedAt = null
                 )
+            }
+            logUi("Firmware catalog refresh: ${betaCandidates.size} beta/RC build(s) currently signed")
+        }
+
+        val merged = if (cacheFile != null) {
+            firmwareMetadataCache.mergeCurrent(cacheFile, currentEntries, refreshedChannels)
+        } else {
+            FirmwareMetadataCache.MergeResult(currentEntries, currentEntries)
+        }
+        if (merged.newBuilds.isEmpty()) {
+            logUi("Firmware catalog refresh: no new firmware builds discovered")
+        } else {
+            merged.newBuilds.forEach { entry ->
+                logUi("Firmware catalog NEW: ${entry.channel} ${entry.version} (${entry.buildId})")
             }
         }
 
-        return choices
+        return merged.entries
+            .filter { entry ->
+                entry.currentlySigned &&
+                    (entry.channel == FirmwareSelectionCandidate.Channel.STABLE || appSettings.includeBetaFirmware)
+            }
+            .map { entry ->
+                FirmwareSelectionCandidate(
+                    channel = entry.channel,
+                    version = entry.version,
+                    buildId = entry.buildId,
+                    releaseDate = entry.releaseDate,
+                    fileSize = entry.fileSize
+                )
+            }
             .distinctBy { "${it.channel}:${it.buildId}" }
             .sortedWith(
                 compareByDescending<FirmwareSelectionCandidate> { it.releaseDate ?: Instant.EPOCH }
@@ -532,32 +578,46 @@ class MainActivity : AppCompatActivity() {
                 log("Firmware catalog chooser cancelled")
             }
             .show()
-        log("Firmware catalog chooser: showing ${choices.size} signed build(s)")
+        log("Firmware catalog chooser: showing ${choices.size} currently signed build(s)")
     }
 
     private fun resolveFirmwareChoice(identifier: String, choice: FirmwareSelectionCandidate) {
         if (firmwareSelectionInFlight) return
         firmwareSelectionInFlight = true
         binding.selectFirmwareButton.isEnabled = false
-        binding.firmwareStatus.text = "Resolving ${choice.version} (${choice.buildId})…"
+        binding.firmwareStatus.text = "Reverifying ${choice.version} (${choice.buildId})…"
         log("Firmware chosen by user: ${choice.channel} ${choice.version} (${choice.buildId})")
+        log("Firmware verification gate: cached signing/URL/size metadata will not be trusted")
 
         worker.execute {
             val firmware = when (choice.channel) {
-                FirmwareSelectionCandidate.Channel.STABLE -> choice.stableFirmware
+                FirmwareSelectionCandidate.Channel.STABLE -> runCatching {
+                    firmwareCatalog.reverifySigned(identifier, choice.buildId)
+                }.onFailure { error ->
+                    logUi("Selected stable firmware reverify failed: ${error.javaClass.simpleName}: ${error.message}")
+                }.getOrNull()
+
                 FirmwareSelectionCandidate.Channel.BETA,
-                FirmwareSelectionCandidate.Channel.RC -> choice.betaCandidate?.let { candidate ->
-                    runCatching { betaFirmwareCatalog.resolveSigned(identifier, candidate) }
-                        .onFailure { error ->
-                            logUi("Selected beta/RC resolution failed: ${error.javaClass.simpleName}: ${error.message}")
-                        }
-                        .getOrNull()
-                }
+                FirmwareSelectionCandidate.Channel.RC -> runCatching {
+                    betaFirmwareCatalog.reverifySigned(identifier, choice.buildId)
+                }.onFailure { error ->
+                    logUi("Selected beta/RC firmware reverify failed: ${error.javaClass.simpleName}: ${error.message}")
+                }.getOrNull()
             }
 
             if (firmware == null) {
-                logUi("Selected firmware could not be resolved to an Apple CDN payload")
+                clearFirmwareSelection("fresh firmware verification failed")
+                logUi("Firmware selection BLOCKED: build is no longer signed or Apple payload verification failed")
+            } else if (identifiedDevice?.identifier != identifier) {
+                logUi("Firmware selection BLOCKED: connected device changed during verification")
             } else {
+                runCatching {
+                    val cacheFile = firmwareStorage.catalogCacheFor(identifier)
+                    firmwareMetadataCache.recordVerification(cacheFile, firmware, choice.channel)
+                }.onFailure { error ->
+                    logUi("Firmware metadata verification cache update failed: ${error.message}")
+                }
+                logUi("Firmware verification PASSED: current signing state and Apple CDN payload confirmed")
                 applyFirmwareSelection(firmware, choice.channel)
             }
 
@@ -584,7 +644,7 @@ class MainActivity : AppCompatActivity() {
                     if (present) {
                         logUi("Firmware file found: ${location.file.length()} bytes")
                         if (firmware.fileSize > 0L && location.file.length() == firmware.fileSize) {
-                            logUi("Firmware file status: ready (exact Apple/catalog size match)")
+                            logUi("Firmware file status: ready (fresh Apple size match)")
                         } else if (firmware.fileSize > 0L) {
                             logUi("Firmware file status: size mismatch expected=${firmware.fileSize} actual=${location.file.length()}")
                         }
@@ -618,7 +678,7 @@ class MainActivity : AppCompatActivity() {
         if (firmware == null || destination == null) {
             binding.firmwareTitle.text = firmware?.let { "Firmware ${it.version} (${it.buildId})" } ?: "Firmware"
             binding.firmwareStatus.text = when {
-                firmwareSelectionInFlight -> "Loading or resolving firmware catalog…"
+                firmwareSelectionInFlight -> "Refreshing catalog or reverifying firmware…"
                 firmware != null -> "Firmware selected — storage destination unavailable"
                 identifiedDevice != null -> "Device identified — tap Select signed firmware"
                 else -> "Waiting for device identification"
@@ -646,14 +706,14 @@ class MainActivity : AppCompatActivity() {
                 binding.cancelDownloadButton.isEnabled = true
             }
             complete -> {
-                binding.firmwareStatus.text = "Ready — firmware already present"
+                binding.firmwareStatus.text = "Ready — selected firmware freshly verified"
                 binding.firmwareProgress.progress = 1000
-                binding.firmwareProgressText.text = "${FirmwareDownloadService.formatBytes(actual)} verified by exact size"
+                binding.firmwareProgressText.text = "${FirmwareDownloadService.formatBytes(actual)} verified by fresh Apple size"
                 binding.downloadFirmwareButton.isEnabled = false
                 binding.cancelDownloadButton.isEnabled = false
             }
             partial > 0L -> {
-                binding.firmwareStatus.text = "Partial download found — resume available"
+                binding.firmwareStatus.text = "Verified selection — partial download found"
                 binding.firmwareProgress.progress = if (expected > 0L) ((partial * 1000L) / expected).toInt().coerceIn(0, 1000) else 0
                 binding.firmwareProgressText.text = "${FirmwareDownloadService.formatBytes(partial)} / ${FirmwareDownloadService.formatBytes(expected)}"
                 binding.downloadFirmwareButton.text = "Resume firmware download"
@@ -661,7 +721,7 @@ class MainActivity : AppCompatActivity() {
                 binding.cancelDownloadButton.isEnabled = false
             }
             else -> {
-                binding.firmwareStatus.text = if (destination.isFile) "Existing file has the wrong size" else "Firmware not downloaded"
+                binding.firmwareStatus.text = if (destination.isFile) "Existing file has the wrong size" else "Verified selection — firmware not downloaded"
                 binding.firmwareProgress.progress = 0
                 binding.firmwareProgressText.text = "Expected ${FirmwareDownloadService.formatBytes(expected)}"
                 binding.downloadFirmwareButton.text = "Download firmware"
@@ -779,8 +839,9 @@ class MainActivity : AppCompatActivity() {
             appendLine("Project root: ${firmwareStorage.projectRoot.absolutePath}")
             appendLine("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
             appendLine("Firmware selection mode: manual catalog chooser")
+            appendLine("Firmware metadata mode: persistent cache + current index refresh + selection reverify")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
-            latestSignedFirmware?.let { appendLine("Selected signed firmware: ${it.version} (${it.buildId})") }
+            latestSignedFirmware?.let { appendLine("Selected freshly verified firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
             firmwareDestination?.let {
                 appendLine("Firmware destination: ${it.absolutePath}")
