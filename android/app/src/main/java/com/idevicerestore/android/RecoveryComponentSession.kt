@@ -1,6 +1,7 @@
 package com.idevicerestore.android
 
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import java.io.File
 import java.io.FileInputStream
@@ -16,8 +17,8 @@ import java.io.InputStream
 class RecoveryComponentSession(
     device: UsbDevice,
     private val command: RecoveryTransport,
-    connectionBulkOut: UsbEndpoint,
-    connection: android.hardware.usb.UsbDeviceConnection
+    connection: UsbDeviceConnection,
+    bulkOut: UsbEndpoint
 ) {
     enum class Component {
         IBEC,
@@ -45,7 +46,7 @@ class RecoveryComponentSession(
         require(AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY) {
             "Recovery component session requires Recovery mode, got ${AppleUsb.mode(device)}"
         }
-        uploader = RecoveryUploadTransport(connection, connectionBulkOut)
+        uploader = RecoveryUploadTransport(connection, bulkOut)
     }
 
     fun lastUploadedComponent(): UploadedComponent? = lastUpload
