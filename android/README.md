@@ -1,74 +1,96 @@
-# iDeviceRestore Android Lab (Milestone 1)
+# iDeviceRestore for Android
 
-A minimal Android USB-host app for validating direct communication with Apple devices in DFU and Recovery/iBoot modes. It is intentionally **not** a restore/flashing app yet.
+Android is the active development target for this fork. The app is being built around direct USB-host communication with Apple devices in DFU and Recovery/iBoot modes, with the long-term goal of bringing the iDeviceRestore restore flow to Android.
 
-The protocol structure is based on this `dracinn/iDeviceRestore` repository and its `libirecovery` dependency. The first milestone avoids native `libusb` so Android can grant and own the USB file descriptor normally.
+The first milestone intentionally avoids native `libusb`: Android owns USB permission through `UsbDeviceConnection`, which lets us validate device detection, interface claiming and protocol traffic before adding JNI/native restore components.
 
-## What works in this scaffold
+## Current functionality
 
 - Detect Apple USB devices (VID `0x05AC`)
 - Classify common DFU (`0x1227`), Recovery (`0x1280`, `0x1281`) and WTF (`0x1222`) product IDs
-- Request Android USB permission
-- Enumerate interfaces/endpoints
+- Request Android USB-host permission
+- Enumerate interfaces and endpoints
 - Claim a USB interface
-- DFU: issue `DFU_GETSTATUS` only (non-flashing probe)
-- Recovery/iBoot: send `getenv build-version` and attempt to read console data from bulk IN
-- Log all results on screen
+- DFU: issue `DFU_GETSTATUS` only
+- Recovery/iBoot: send `getenv build-version` and attempt to read the response
+- On-device diagnostic logging
 
-## Develop without a computer
+## Phone-only development with GitHub Actions
 
-The `Android CI` GitHub Actions workflow builds the app entirely on GitHub-hosted runners.
+No local computer is required for compilation.
 
-1. Edit files under `android/` using GitHub's web editor from a phone or tablet.
+1. Edit files under `android/` from GitHub on your phone or tablet.
 2. Commit changes to the `android-ci` branch.
-3. Open the repository's **Actions** tab and select **Android CI**.
-4. Open the latest successful run and download the `iDeviceRestore-android-debug` artifact.
-5. Extract the ZIP on Android and install `app-debug.apk` after allowing installs from your browser/file manager.
+3. `Android CI` builds a debug APK on a GitHub-hosted runner.
+4. Open the successful Actions run and download the `iDeviceRestore-android-debug` artifact.
+5. Extract and install the APK on an Android device.
 
-The workflow can also be started manually with **Run workflow**. It uses JDK 17 and Gradle 8.9 because Android Gradle Plugin 8.7.x requires those versions.
+Only Android workflows are kept on the Android development branch. Desktop build workflows from the upstream project are removed there.
 
-## Why the first version is Kotlin USB instead of compiling iDeviceRestore directly
+## Public releases and Obtainium
 
-`iDeviceRestore` uses `libirecovery`, which normally opens USB through libusb. Android requires app-level USB permission and hands the app a `UsbDeviceConnection`. Starting with Android's USB Host API proves the actual DFU/recovery request shapes and device/interface behavior before adding JNI/native libraries.
+Public releases are produced by `.github/workflows/android-release.yml`.
 
-Milestone 2 should add a native bridge and either:
+A release tag such as `v0.1.0` builds a signed release APK and publishes a GitHub Release with this stable asset name:
 
-1. modify/fork `libirecovery` to accept a pre-opened Android USB file descriptor, or
-2. keep an Android-specific USB backend behind a small `irecv`-compatible adapter.
+`iDeviceRestore.apk`
 
-The second option is usually cleaner for Android because the app remains owner of permission, attach/detach and lifecycle.
+That makes the repository directly usable as an Obtainium source. In Obtainium, add the GitHub repository URL and use the GitHub Releases source. New version tags will appear as updates.
 
-## Physical test hardware
+### Signing is required once
 
-GitHub Actions can compile and package the app, but hosted runners cannot connect to your iPhone/iPad. For real DFU/recovery communication you need a physical Android phone/tablet that supports USB Host/OTG. Connect the Apple device to the Android device with a data-capable OTG/USB-C cable or hub.
+Android requires every update to be signed with the same private key. Do not use GitHub's temporary debug key for public releases.
 
-## First test sequence
+Create a release keystore once and add these repository Actions secrets:
+
+- `ANDROID_KEYSTORE_BASE64` — base64-encoded `.jks` keystore
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Keep the original keystore backed up securely. Losing it means existing installations cannot update to APKs signed with a replacement key.
+
+The release workflow reads those secrets only at build time. The private signing key is not committed to the repository or included in release assets.
+
+## Versioning
+
+Use normal Android-style semantic release tags:
+
+- `v0.1.0`
+- `v0.1.1`
+- `v0.2.0`
+
+The tag becomes `versionName`. GitHub Actions supplies an increasing `versionCode` for install/update compatibility.
+
+## Physical testing
+
+GitHub Actions can compile and package the app, but hosted runners cannot physically connect to an iPhone or iPad. Real DFU/recovery tests require an Android phone/tablet supporting USB Host/OTG and a data-capable USB-C/OTG cable or hub.
 
 ### DFU
 
-1. Put an iPhone/iPad into DFU mode.
+1. Put the Apple device into DFU mode.
 2. Connect it to the Android host.
 3. Accept the USB permission prompt.
 4. Tap **Probe DFU / Recovery**.
-5. Record the complete on-screen log, including interface and endpoint information.
+5. Save the interface/endpoint and DFU status log.
 
 ### Recovery
 
-1. Put the device into Recovery mode.
+1. Put the Apple device into Recovery mode.
 2. Connect it to Android.
 3. Tap **Probe DFU / Recovery**.
-4. The app sends only `getenv build-version` and attempts to read the response.
+4. The app sends the non-destructive `getenv build-version` command and attempts to read its response.
 
-If command write succeeds but no response is read, record the interface/endpoint dump from the app. The next step is to match libirecovery's exact recovery interface/alt-setting behavior for that device generation.
+## Architecture direction
 
-## Safety scope
+`iDeviceRestore` normally communicates through `libirecovery`, which opens USB using libusb. Android instead grants USB access to an application and exposes the device through `UsbDeviceConnection`.
 
-Milestone 1 deliberately excludes firmware upload, erase, TSS signing, iBSS/iBEC transfer, restore mode services and baseband operations.
+The Android port will therefore evolve toward an `irecv`-compatible Android transport/JNI layer rather than forcing desktop-style USB ownership into the app.
 
 ## Roadmap
 
 - M1: USB discovery + DFU_GETSTATUS + recovery query
-- M2: JNI `irecv` adapter + ECID/CPID/BDID parsing + hotplug lifecycle
-- M3: iBSS/iBEC upload with progress callbacks on dedicated test hardware
+- M2: `irecv`-compatible transport/JNI + ECID/CPID/BDID + hotplug lifecycle
+- M3: controlled iBSS/iBEC transfer with progress reporting on dedicated test hardware
 - M4: restore-mode usbmuxd/mobiledevice transport
 - M5: IPSW parsing, TSS, personalization and complete restore state machine
