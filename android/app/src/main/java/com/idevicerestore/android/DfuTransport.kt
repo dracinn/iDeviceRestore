@@ -2,7 +2,7 @@ package com.idevicerestore.android
 
 import android.hardware.usb.UsbDeviceConnection
 
-/** Read-only USB DFU class requests used to inspect Apple DFU state. */
+/** Read-only USB DFU class/descriptor requests used to inspect Apple DFU state. */
 class DfuTransport(private val connection: UsbDeviceConnection) {
     data class Status(
         val status: Int,
@@ -25,6 +25,21 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
         val raw: ByteArray
     ) {
         val name: String get() = stateName(value)
+    }
+
+    data class FunctionalDescriptor(
+        val attributes: Int,
+        val detachTimeoutMs: Int,
+        val transferSize: Int,
+        val bcdDfuVersion: Int,
+        val raw: ByteArray
+    ) {
+        val canDownload: Boolean get() = attributes and 0x01 != 0
+        val canUpload: Boolean get() = attributes and 0x02 != 0
+        val manifestationTolerant: Boolean get() = attributes and 0x04 != 0
+        val willDetach: Boolean get() = attributes and 0x08 != 0
+        val versionText: String
+            get() = "%x.%02x".format((bcdDfuVersion ushr 8) and 0xff, bcdDfuVersion and 0xff)
     }
 
     /**
@@ -74,11 +89,48 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
         return State(data[0].toInt() and 0xff, data)
     }
 
+    /**
+     * Requests the standard 9-byte DFU functional descriptor for an interface.
+     * GET_DESCRIPTOR is read-only. Some bootloaders may stall this request; callers
+     * should treat that as descriptor-unavailable rather than a DFU failure.
+     */
+    fun getFunctionalDescriptor(interfaceId: Int): FunctionalDescriptor {
+        require(interfaceId in 0..255) { "interfaceId must be between 0 and 255" }
+        val data = ByteArray(9)
+        val n = connection.controlTransfer(
+            STANDARD_INTERFACE_IN,
+            USB_GET_DESCRIPTOR,
+            DFU_FUNCTIONAL_DESCRIPTOR_TYPE shl 8,
+            interfaceId,
+            data,
+            data.size,
+            USB_TIMEOUT_MS
+        )
+        check(n >= 9) { "DFU functional descriptor returned $n bytes" }
+        check((data[0].toInt() and 0xff) >= 9) { "DFU functional descriptor length is ${data[0].toInt() and 0xff}" }
+        check((data[1].toInt() and 0xff) == DFU_FUNCTIONAL_DESCRIPTOR_TYPE) {
+            "Unexpected descriptor type 0x%02X".format(data[1].toInt() and 0xff)
+        }
+        return FunctionalDescriptor(
+            attributes = data[2].toInt() and 0xff,
+            detachTimeoutMs = littleEndian16(data, 3),
+            transferSize = littleEndian16(data, 5),
+            bcdDfuVersion = littleEndian16(data, 7),
+            raw = data
+        )
+    }
+
     companion object {
         private const val DFU_REQUEST_TYPE_IN = 0xA1
+        private const val STANDARD_INTERFACE_IN = 0x81
+        private const val USB_GET_DESCRIPTOR = 6
+        private const val DFU_FUNCTIONAL_DESCRIPTOR_TYPE = 0x21
         private const val DFU_GETSTATUS = 3
         private const val DFU_GETSTATE = 5
         private const val USB_TIMEOUT_MS = 5_000
+
+        private fun littleEndian16(data: ByteArray, offset: Int): Int =
+            (data[offset].toInt() and 0xff) or ((data[offset + 1].toInt() and 0xff) shl 8)
 
         fun stateName(state: Int): String = when (state) {
             0 -> "appIDLE"
