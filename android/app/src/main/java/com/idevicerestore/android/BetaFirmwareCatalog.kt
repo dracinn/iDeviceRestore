@@ -35,82 +35,103 @@ class BetaFirmwareCatalog(
         val indexUrl = "$endpoint/$encoded"
         logger("BetaFirmwareCatalog: GET $indexUrl")
         val html = get(indexUrl)
-        logger("BetaFirmwareCatalog: received ${html.length} characters; parsing signed beta/RC rows")
+        logger("BetaFirmwareCatalog: received ${html.length} characters; parsing beta/RC rows")
 
-        val row = parseLatestSignedRow(html)
-        logger(
-            "BetaFirmwareCatalog: parsed ${row.version} (${row.buildId}) " +
-                "released=${row.releaseDateText} size=${row.fileSizeText}"
-        )
+        val rows = parseRows(html)
+        logger("BetaFirmwareCatalog: parsed ${rows.size} beta/RC candidate row(s)")
+        if (rows.isEmpty()) error("No beta/RC firmware rows could be parsed for device")
 
-        val detailUrl = "$endpoint/download/$encoded/${row.buildId}"
-        logger("BetaFirmwareCatalog: GET $detailUrl")
-        val detail = get(detailUrl)
-        logger("BetaFirmwareCatalog: received ${detail.length} detail characters; resolving Apple CDN URL")
+        // The signing mark on IPSW.dev is rendered as an icon/SVG and may disappear when HTML is
+        // flattened to text. Verify signing on the detail page instead of depending on that glyph.
+        for (row in rows.take(MAX_DETAIL_PROBES)) {
+            logger(
+                "BetaFirmwareCatalog: candidate ${row.version} (${row.buildId}) " +
+                    "released=${row.releaseDateText} size=${row.fileSizeText}"
+            )
 
-        val appleUrl = Regex("https://updates\\.cdn-apple\\.com/[^\"'<>\\s]+", RegexOption.IGNORE_CASE)
-            .find(detail)?.value
-            ?: error("Signed beta build ${row.buildId} did not expose an Apple CDN IPSW URL")
+            val detailUrl = "$endpoint/download/$encoded/${row.buildId}"
+            logger("BetaFirmwareCatalog: GET $detailUrl")
+            val detail = get(detailUrl)
+            logger("BetaFirmwareCatalog: received ${detail.length} detail characters")
 
-        val fileSizeText = Regex(
-            "File\\s*size[^0-9]{0,120}([0-9]+(?:\\.[0-9]+)?)\\s*(GB|GiB|MB|MiB)",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-        ).find(detail)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
-            ?: row.fileSizeText
+            val signed = detail.contains("This firmware is signed", ignoreCase = true)
+            if (!signed) {
+                logger("BetaFirmwareCatalog: ${row.buildId} is not reported as signed; checking next candidate")
+                continue
+            }
 
-        // The index row is the signing authority for selection. The detail page wording can change,
-        // so do not reject a row merely because a prose phrase is absent from the detail HTML.
-        logger("BetaFirmwareCatalog: Apple CDN URL resolved for signed build ${row.buildId}")
+            val appleUrl = Regex("https://updates\\.cdn-apple\\.com/[^\"'<>\\s]+", RegexOption.IGNORE_CASE)
+                .find(detail)?.value
+            if (appleUrl == null) {
+                logger("BetaFirmwareCatalog: signed build ${row.buildId} has no Apple CDN URL; checking next candidate")
+                continue
+            }
 
-        return FirmwareCatalog.Firmware(
-            identifier = identifier,
-            version = row.version,
-            buildId = row.buildId,
-            url = appleUrl,
-            fileSize = parseSize(fileSizeText),
-            sha1 = null,
-            releaseDate = parseDate(row.releaseDateText),
-            uploadDate = null,
-            signed = true
-        )
+            val fileSizeText = Regex(
+                "File\\s*size[^0-9]{0,120}([0-9]+(?:\\.[0-9]+)?)\\s*(GB|GiB|MB|MiB)",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+            ).find(detail)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
+                ?: row.fileSizeText
+
+            logger("BetaFirmwareCatalog: selected signed build ${row.buildId}; Apple CDN URL resolved")
+            return FirmwareCatalog.Firmware(
+                identifier = identifier,
+                version = row.version,
+                buildId = row.buildId,
+                url = appleUrl,
+                fileSize = parseSize(fileSizeText),
+                sha1 = null,
+                releaseDate = parseDate(row.releaseDateText),
+                uploadDate = null,
+                signed = true
+            )
+        }
+
+        logger("BetaFirmwareCatalog: no signed beta/RC with an Apple CDN URL found in first $MAX_DETAIL_PROBES candidates")
+        return null
     }
 
     /**
-     * Convert the page to bounded plain text first, then match one compact row.
-     * Avoid a page-wide DOT_MATCHES_ALL <tr> regex: on script-heavy HTML a near miss can trigger
-     * severe regex backtracking and make the lookup appear to hang immediately after HTTP 200.
+     * Convert the page to bounded plain text and parse version/build/date/size tuples.
+     * Signing is intentionally not parsed here because the current site renders that state as an
+     * icon rather than reliable textual content. The detail page is used as the signing authority.
      */
-    private fun parseLatestSignedRow(html: String): ParsedRow {
+    private fun parseRows(html: String): List<ParsedRow> {
         val text = html
             .replace(Regex("(?is)<script\\b[^>]*>.*?</script>"), " ")
             .replace(Regex("(?is)<style\\b[^>]*>.*?</style>"), " ")
             .replace(Regex("(?is)<[^>]{1,512}>"), " ")
-            .replace("&check;", "✓", ignoreCase = true)
-            .replace("&#10003;", "✓", ignoreCase = true)
-            .replace("&#x2713;", "✓", ignoreCase = true)
             .replace("&nbsp;", " ", ignoreCase = true)
             .replace("&amp;", "&", ignoreCase = true)
+            .replace("&#44;", ",", ignoreCase = true)
             .replace(Regex("\\s+"), " ")
             .trim()
 
         logger("BetaFirmwareCatalog: normalized page to ${text.length} characters")
 
-        // Example normalized row:
-        // 27.0 beta 8 26A5425a ✓ August 31, 2026 22.74 GB
-        val match = Regex(
+        // Current page shape after markup removal resembles:
+        // 27.0 beta 8 26A5425a August 31, 2026 22.74 GB
+        // The signing SVG/icon may contribute no text at all, so allow a small non-alphanumeric
+        // separator region between build and date without requiring a checkmark character.
+        val regex = Regex(
             "([0-9]+(?:\\.[0-9]+){1,3}\\s+(?:(?:beta)(?:\\s+[0-9]+)?(?:\\s+v\\.?\\s*[0-9]+)?|RC(?:\\s+[0-9]+)?))\\s+" +
-                "([A-Za-z0-9]+)\\s+✓\\s+" +
+                "([A-Za-z0-9]+)\\s+[^A-Za-z0-9]{0,12}\\s*" +
                 "([A-Za-z]+\\s+[0-9]{1,2},\\s+[0-9]{4})\\s+" +
-                "([0-9]+(?:\\.[0-9]+)?\\s*(?:GB|GiB|MB|MiB))",
+                "((?:[0-9]+(?:\\.[0-9]+)?\\s*(?:GB|GiB|MB|MiB))|N/A)",
             RegexOption.IGNORE_CASE
-        ).find(text) ?: error("No signed beta/RC firmware row could be parsed for device")
-
-        return ParsedRow(
-            version = match.groupValues[1].trim().replace(Regex("\\s+"), " "),
-            buildId = match.groupValues[2].trim(),
-            releaseDateText = match.groupValues[3].trim(),
-            fileSizeText = match.groupValues[4].trim()
         )
+
+        return regex.findAll(text)
+            .map { match ->
+                ParsedRow(
+                    version = match.groupValues[1].trim().replace(Regex("\\s+"), " "),
+                    buildId = match.groupValues[2].trim(),
+                    releaseDateText = match.groupValues[3].trim(),
+                    fileSizeText = match.groupValues[4].trim()
+                )
+            }
+            .distinctBy { it.buildId }
+            .toList()
     }
 
     private fun parseDate(value: String): Instant? = runCatching {
@@ -151,5 +172,9 @@ class BetaFirmwareCatalog(
         } finally {
             connection.disconnect()
         }
+    }
+
+    companion object {
+        private const val MAX_DETAIL_PROBES = 8
     }
 }
