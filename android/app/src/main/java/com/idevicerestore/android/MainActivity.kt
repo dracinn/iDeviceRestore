@@ -22,10 +22,13 @@ class MainActivity : AppCompatActivity() {
     private var selected: UsbDevice? = null
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
+    private val firmwareCatalog by lazy { FirmwareCatalog(logger = { message -> logUi(message) }) }
 
     @Volatile
     private var probeInFlight = false
     private var lastAutoProbeDeviceName: String? = null
+    private var identifiedDevice: FirmwareCatalog.Device? = null
+    private var latestSignedFirmware: FirmwareCatalog.Firmware? = null
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -53,6 +56,8 @@ class MainActivity : AppCompatActivity() {
                     log("USB device detached: ${device?.deviceName ?: "unknown"}")
                     if (device != null && device.deviceName == lastAutoProbeDeviceName) {
                         lastAutoProbeDeviceName = null
+                        identifiedDevice = null
+                        latestSignedFirmware = null
                     }
                     scan()
                 }
@@ -103,6 +108,8 @@ class MainActivity : AppCompatActivity() {
         selected = preferred
         if (preferred == null) {
             lastAutoProbeDeviceName = null
+            identifiedDevice = null
+            latestSignedFirmware = null
             binding.status.text = "No Apple USB device found"
             binding.probeButton.isEnabled = false
             return
@@ -170,6 +177,7 @@ class MainActivity : AppCompatActivity() {
             val connection = usbManager.openDevice(device)
             if (connection == null) {
                 logUi("openDevice failed")
+                identifyDeviceAndFirmware(device)
                 finishProbe(device)
                 return@execute
             }
@@ -217,9 +225,60 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 connection.close()
                 logUi("USB connection closed")
+                identifyDeviceAndFirmware(device)
                 finishProbe(device)
             }
         }
+    }
+
+    private fun identifyDeviceAndFirmware(device: UsbDevice) {
+        val ids = AppleUsb.bootIdentifiers(device)
+        val cpid = ids?.cpid
+        val bdid = ids?.bdid
+        if (cpid == null || bdid == null) {
+            logUi("Device identification skipped: CPID/BDID unavailable")
+            return
+        }
+
+        logUi("Device identification: querying catalog from CPID/BDID")
+        runCatching { firmwareCatalog.findDeviceByBootIds(cpid, bdid) }
+            .onFailure { error ->
+                logUi("Device identification failed: ${error.javaClass.simpleName}: ${error.message}")
+            }
+            .onSuccess { catalogDevice ->
+                if (catalogDevice == null) {
+                    logUi("Device identification: no catalog match for CPID=0x%04X BDID=0x%02X".format(cpid, bdid))
+                    return@onSuccess
+                }
+
+                identifiedDevice = catalogDevice
+                logUi(
+                    "Identified device: ${catalogDevice.name} (${catalogDevice.identifier})" +
+                        (catalogDevice.boardConfig?.let { " board=$it" } ?: "") +
+                        (catalogDevice.platform?.let { " platform=$it" } ?: "")
+                )
+                runOnUiThread {
+                    if (selected?.deviceName == device.deviceName) {
+                        binding.status.text = "${catalogDevice.name} (${catalogDevice.identifier}) — ${AppleUsb.mode(device)}"
+                    }
+                }
+
+                logUi("Firmware catalog: checking latest signed IPSW for ${catalogDevice.identifier}")
+                runCatching { firmwareCatalog.latestSigned(catalogDevice.identifier) }
+                    .onFailure { error ->
+                        logUi("Signed firmware lookup failed: ${error.javaClass.simpleName}: ${error.message}")
+                    }
+                    .onSuccess { firmware ->
+                        latestSignedFirmware = firmware
+                        if (firmware == null) {
+                            logUi("Latest signed firmware: none reported")
+                        } else {
+                            val size = if (firmware.fileSize >= 0) " size=${firmware.fileSize} bytes" else ""
+                            logUi("Latest signed firmware: ${firmware.version} (${firmware.buildId})$size")
+                            logUi("Latest signed firmware URL: ${firmware.url}")
+                        }
+                    }
+            }
     }
 
     private fun finishProbe(device: UsbDevice) = runOnUiThread {
@@ -236,6 +295,8 @@ class MainActivity : AppCompatActivity() {
             appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
             appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
+            latestSignedFirmware?.let { appendLine("Latest signed firmware: ${it.version} (${it.buildId})") }
             appendLine("---")
             append(logBuffer.toString())
         }
