@@ -1,10 +1,12 @@
 package com.idevicerestore.android
 
+import android.Manifest
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
@@ -12,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.idevicerestore.android.databinding.ActivityMainBinding
 import java.io.File
 import java.text.SimpleDateFormat
@@ -41,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private var sharedStorageSettingsOpened = false
     private var sharedStorageAccessLogged = false
     private var lastIncludeBetaSetting = false
+    private var firmwareDownloadActive = false
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -72,9 +76,11 @@ class MainActivity : AppCompatActivity() {
                         latestSignedFirmware = null
                         firmwareWorkspace = null
                         firmwareDestination = null
+                        updateFirmwareUi()
                     }
                     scan()
                 }
+                FirmwareDownloadService.ACTION_STATE -> handleFirmwareDownloadState(intent)
             }
         }
     }
@@ -90,12 +96,15 @@ class MainActivity : AppCompatActivity() {
             addAction(permissionAction)
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            addAction(FirmwareDownloadService.ACTION_STATE)
         }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(receiver, filter)
 
         binding.scanButton.setOnClickListener { scan() }
         binding.probeButton.setOnClickListener { probeSelected(manual = true) }
+        binding.downloadFirmwareButton.setOnClickListener { startFirmwareDownload() }
+        binding.cancelDownloadButton.setOnClickListener { cancelFirmwareDownload() }
         binding.settingsButton.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         binding.shareLogsButton.setOnClickListener { shareLogs() }
 
@@ -107,7 +116,9 @@ class MainActivity : AppCompatActivity() {
         log("Shared diagnostic privacy redaction: enabled")
         log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
         log("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
+        log("Firmware downloads: Apple CDN only; resumable single-stream mode")
         ensureSharedStorageAccess(openSettings = true)
+        updateFirmwareUi()
         scan()
     }
 
@@ -135,9 +146,12 @@ class MainActivity : AppCompatActivity() {
                         latestSignedFirmware?.let { firmware ->
                             firmwareDestination = firmwareStorage.locationFor(firmware).file
                         }
+                        updateFirmwareUi()
                     }
                     .onFailure { error -> log("Firmware storage setup failed after permission grant: ${error.message}") }
             }
+        } else if (granted) {
+            updateFirmwareUi()
         }
     }
 
@@ -209,6 +223,7 @@ class MainActivity : AppCompatActivity() {
                 "Storage access required — enable All files access"
             }
             binding.probeButton.isEnabled = false
+            updateFirmwareUi()
             return
         }
         showSelected(preferred)
@@ -413,6 +428,7 @@ class MainActivity : AppCompatActivity() {
         if (preferred == null) {
             logUi("Latest signed firmware: none reported")
             firmwareDestination = null
+            runOnUiThread { updateFirmwareUi() }
             return
         }
 
@@ -430,12 +446,167 @@ class MainActivity : AppCompatActivity() {
                     firmwareWorkspace = location.workspace
                     firmwareDestination = location.file
                     logUi("Firmware download destination: ${location.file.absolutePath}")
+                    val present = location.file.isFile
+                    if (present) {
+                        logUi("Firmware file found: ${location.file.length()} bytes")
+                        if (preferred.fileSize > 0L && location.file.length() == preferred.fileSize) {
+                            logUi("Firmware file status: ready (exact Apple/catalog size match)")
+                        } else if (preferred.fileSize > 0L) {
+                            logUi("Firmware file status: size mismatch expected=${preferred.fileSize} actual=${location.file.length()}")
+                        }
+                    } else {
+                        val partial = firmwareStorage.partialBytes(preferred)
+                        if (partial > 0L) logUi("Firmware partial download found: $partial bytes; resume available")
+                    }
+                    runOnUiThread { updateFirmwareUi() }
                 }
                 .onFailure { error ->
                     logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                    runOnUiThread { updateFirmwareUi() }
                 }
         } else {
             logUi("Firmware destination pending shared storage permission")
+            runOnUiThread { updateFirmwareUi() }
+        }
+    }
+
+    private fun updateFirmwareUi() {
+        val firmware = latestSignedFirmware
+        val destination = firmwareDestination
+        if (firmware == null || destination == null) {
+            binding.firmwareStatus.text = "Waiting for signed firmware selection"
+            binding.firmwareProgress.progress = 0
+            binding.firmwareProgressText.text = ""
+            binding.downloadFirmwareButton.isEnabled = false
+            binding.cancelDownloadButton.isEnabled = firmwareDownloadActive
+            return
+        }
+
+        binding.firmwareTitle.text = "Firmware ${firmware.version} (${firmware.buildId})"
+        val expected = firmware.fileSize
+        val actual = destination.takeIf { it.isFile }?.length() ?: 0L
+        val complete = destination.isFile && (expected <= 0L || actual == expected)
+        val partial = if (!complete && firmwareStorage.hasSharedStorageAccess()) {
+            runCatching { firmwareStorage.partialBytes(firmware) }.getOrDefault(0L)
+        } else 0L
+
+        when {
+            firmwareDownloadActive -> {
+                binding.firmwareStatus.text = "Downloading from Apple CDN"
+                binding.downloadFirmwareButton.isEnabled = false
+                binding.cancelDownloadButton.isEnabled = true
+            }
+            complete -> {
+                binding.firmwareStatus.text = "Ready — firmware already present"
+                binding.firmwareProgress.progress = 1000
+                binding.firmwareProgressText.text = "${FirmwareDownloadService.formatBytes(actual)} verified by exact size"
+                binding.downloadFirmwareButton.isEnabled = false
+                binding.cancelDownloadButton.isEnabled = false
+            }
+            partial > 0L -> {
+                binding.firmwareStatus.text = "Partial download found — resume available"
+                binding.firmwareProgress.progress = if (expected > 0L) ((partial * 1000L) / expected).toInt().coerceIn(0, 1000) else 0
+                binding.firmwareProgressText.text = "${FirmwareDownloadService.formatBytes(partial)} / ${FirmwareDownloadService.formatBytes(expected)}"
+                binding.downloadFirmwareButton.text = "Resume firmware download"
+                binding.downloadFirmwareButton.isEnabled = firmwareStorage.hasSharedStorageAccess()
+                binding.cancelDownloadButton.isEnabled = false
+            }
+            else -> {
+                binding.firmwareStatus.text = if (destination.isFile) "Existing file has the wrong size" else "Firmware not downloaded"
+                binding.firmwareProgress.progress = 0
+                binding.firmwareProgressText.text = "Expected ${FirmwareDownloadService.formatBytes(expected)}"
+                binding.downloadFirmwareButton.text = "Download firmware"
+                binding.downloadFirmwareButton.isEnabled = firmwareStorage.hasSharedStorageAccess()
+                binding.cancelDownloadButton.isEnabled = false
+            }
+        }
+    }
+
+    private fun startFirmwareDownload() {
+        val firmware = latestSignedFirmware ?: return
+        val destination = firmwareDestination ?: return
+        if (!firmwareStorage.hasSharedStorageAccess()) {
+            log("Firmware download blocked: shared storage access is unavailable")
+            ensureSharedStorageAccess(openSettings = true)
+            return
+        }
+        if (!firmware.url.startsWith("https://updates.cdn-apple.com/")) {
+            log("Firmware download blocked: selected payload is not on Apple's CDN")
+            return
+        }
+
+        val partial = runCatching { firmwareStorage.partialBytes(firmware) }.getOrDefault(0L)
+        val remaining = if (firmware.fileSize > 0L) (firmware.fileSize - partial).coerceAtLeast(0L) else -1L
+        if (remaining > 0L && !firmwareStorage.hasEnoughSpace(firmware.identifier, remaining)) {
+            log("Firmware download blocked: insufficient free storage for remaining $remaining bytes")
+            binding.firmwareStatus.text = "Not enough free storage"
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+
+        val intent = Intent(this, FirmwareDownloadService::class.java)
+            .setAction(FirmwareDownloadService.ACTION_START)
+            .putExtra(FirmwareDownloadService.EXTRA_URL, firmware.url)
+            .putExtra(FirmwareDownloadService.EXTRA_DESTINATION, destination.absolutePath)
+            .putExtra(FirmwareDownloadService.EXTRA_EXPECTED_SIZE, firmware.fileSize)
+            .putExtra(FirmwareDownloadService.EXTRA_SHA1, firmware.sha1)
+            .putExtra(FirmwareDownloadService.EXTRA_VERSION, firmware.version)
+            .putExtra(FirmwareDownloadService.EXTRA_BUILD_ID, firmware.buildId)
+
+        firmwareDownloadActive = true
+        binding.downloadFirmwareButton.isEnabled = false
+        binding.cancelDownloadButton.isEnabled = true
+        binding.firmwareStatus.text = "Starting Apple CDN download"
+        log("Firmware download requested: ${firmware.version} (${firmware.buildId})")
+        log("Firmware download mode: single-stream resumable (connections=1)")
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun cancelFirmwareDownload() {
+        log("Firmware download cancellation requested")
+        startService(Intent(this, FirmwareDownloadService::class.java).setAction(FirmwareDownloadService.ACTION_CANCEL))
+    }
+
+    private fun handleFirmwareDownloadState(intent: Intent) {
+        val state = intent.getStringExtra(FirmwareDownloadService.EXTRA_STATE).orEmpty()
+        val message = intent.getStringExtra(FirmwareDownloadService.EXTRA_MESSAGE).orEmpty()
+        val downloaded = intent.getLongExtra(FirmwareDownloadService.EXTRA_DOWNLOADED, 0L)
+        val total = intent.getLongExtra(FirmwareDownloadService.EXTRA_TOTAL, -1L)
+        val speed = intent.getLongExtra(FirmwareDownloadService.EXTRA_BYTES_PER_SECOND, 0L)
+
+        if (state == FirmwareDownloadService.STATE_LOG) {
+            if (message.isNotBlank()) log(message)
+            return
+        }
+
+        if (message.isNotBlank()) log("FirmwareDownloadService: $message")
+        when (state) {
+            FirmwareDownloadService.STATE_RUNNING -> {
+                firmwareDownloadActive = true
+                binding.firmwareStatus.text = message.ifBlank { "Downloading from Apple CDN" }
+                binding.firmwareProgress.progress = if (total > 0L) ((downloaded * 1000L) / total).toInt().coerceIn(0, 1000) else 0
+                binding.firmwareProgressText.text = buildString {
+                    append(FirmwareDownloadService.formatBytes(downloaded))
+                    append(" / ")
+                    append(FirmwareDownloadService.formatBytes(total))
+                    if (speed > 0L) append(" — ${FirmwareDownloadService.formatBytes(speed)}/s")
+                }
+                binding.downloadFirmwareButton.isEnabled = false
+                binding.cancelDownloadButton.isEnabled = true
+            }
+            FirmwareDownloadService.STATE_READY -> {
+                firmwareDownloadActive = false
+                updateFirmwareUi()
+            }
+            FirmwareDownloadService.STATE_FAILED, FirmwareDownloadService.STATE_CANCELLED -> {
+                firmwareDownloadActive = false
+                binding.firmwareStatus.text = message.ifBlank { "Download stopped; resume available" }
+                binding.cancelDownloadButton.isEnabled = false
+                updateFirmwareUi()
+            }
         }
     }
 
@@ -469,7 +640,12 @@ class MainActivity : AppCompatActivity() {
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Selected signed firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
-            firmwareDestination?.let { appendLine("Firmware destination: ${it.absolutePath}") }
+            firmwareDestination?.let {
+                appendLine("Firmware destination: ${it.absolutePath}")
+                appendLine("Firmware file present: ${it.isFile}")
+                if (it.isFile) appendLine("Firmware file size: ${it.length()} bytes")
+            }
+            appendLine("Firmware download active: $firmwareDownloadActive")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
             appendLine("---")
             append(logBuffer.toString())
@@ -499,4 +675,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun logUi(message: String) = runOnUiThread { log(message) }
+
+    companion object {
+        private const val REQUEST_NOTIFICATIONS = 4108
+    }
 }
