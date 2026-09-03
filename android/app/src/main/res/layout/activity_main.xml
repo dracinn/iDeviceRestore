@@ -27,6 +27,11 @@
             android:enabled="false"
             android:text="Probe DFU / Recovery" />
         <Button
+            android:id="@+id/settingsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Settings" />
+        <Button
             android:id="@+id/shareLogsButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
