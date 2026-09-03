@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 /**
  * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
@@ -36,6 +38,9 @@ class FirmwareStorage(
         val file: File,
         val catalogCache: File
     )
+
+    private val preflightStarted = ConcurrentHashMap.newKeySet<String>()
+    private val preflightExecutor = Executors.newSingleThreadExecutor()
 
     /** Existing user-visible project folder at the root of primary shared storage. */
     val projectRoot: File
@@ -78,12 +83,14 @@ class FirmwareStorage(
         val fileName = safeFileName(firmware.fileName).ifBlank {
             safeFileName("${firmware.identifier}_${firmware.version}_${firmware.buildId}.ipsw")
         }
-        return FirmwareLocation(
+        val location = FirmwareLocation(
             workspace = workspace,
             buildDirectory = buildDirectory,
             file = File(buildDirectory, fileName),
             catalogCache = File(workspace.metadata, "catalog.json")
         )
+        maybePreflightComplete(firmware, location.file)
+        return location
     }
 
     fun catalogCacheFor(identifier: String): File = File(prepare(identifier).metadata, "catalog.json")
@@ -118,6 +125,44 @@ class FirmwareStorage(
         partialFiles(destination).forEach { if (it.delete()) deleted++ }
         logger("FirmwareStorage: removed $deleted partial file(s) for ${firmware.identifier} ${firmware.buildId}")
         return deleted
+    }
+
+    private fun maybePreflightComplete(firmware: FirmwareCatalog.Firmware, file: File) {
+        if (!file.isFile) return
+        if (firmware.fileSize > 0L && file.length() != firmware.fileSize) return
+        val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+        if (!preflightStarted.add(key)) return
+
+        preflightExecutor.execute {
+            logger("IPSW preflight: local firmware is complete; starting read-only manifest inspection")
+            runCatching {
+                val device = FirmwareCatalog(logger = { message -> logger("IPSW preflight catalog: $message") })
+                    .listDevices()
+                    .firstOrNull { it.identifier.equals(firmware.identifier, ignoreCase = true) }
+                    ?: error("No device metadata found for ${firmware.identifier}")
+
+                IpswPreflight(logger = logger).inspect(
+                    IpswPreflight.Request(
+                        ipsw = file,
+                        identifier = firmware.identifier,
+                        boardConfig = device.boardConfig,
+                        chipId = device.cpid,
+                        boardId = device.bdid
+                    )
+                )
+            }.onSuccess { result ->
+                logger(
+                    "IPSW preflight: READY identity=${result.identityIndex} " +
+                        "board=${result.boardConfig ?: "unknown"} components=${result.componentPaths.size}; " +
+                        "no USB restore command sent"
+                )
+            }.onFailure { error ->
+                logger(
+                    "IPSW preflight: FAILED ${error.javaClass.simpleName}: ${error.message}; " +
+                        "no USB restore command sent"
+                )
+            }
+        }
     }
 
     private fun partialFiles(destination: File): List<File> =
