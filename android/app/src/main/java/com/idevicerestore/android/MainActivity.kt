@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
                     if (granted && device != null) {
                         selected = device
                         showSelected(device)
+                        log(AppleUsb.bootIdentifierSummary(device))
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -85,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         apple.forEach { device ->
             log(AppleUsb.describe(device))
             log(AppleUsb.interfaceSummary(device))
+            if (usbManager.hasPermission(device)) log(AppleUsb.bootIdentifierSummary(device))
         }
         val preferred = apple.firstOrNull { AppleUsb.mode(it) != AppleUsb.Mode.APPLE_OTHER } ?: apple.firstOrNull()
         selected = preferred
@@ -121,6 +123,7 @@ class MainActivity : AppCompatActivity() {
                 return@execute
             }
             logUi("openDevice succeeded")
+            logUi(AppleUsb.bootIdentifierSummary(device))
             try {
                 val claimed = AppleUsb.claimBestInterface(device, connection)
                 if (claimed == null) {
@@ -144,11 +147,16 @@ class MainActivity : AppCompatActivity() {
                     }
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
-                        logUi("Recovery getenv probe: build-version")
-                        val result = recovery.getenv("build-version")
-                        logUi("Recovery command control-OUT: ${result.commandBytes} bytes")
-                        logUi("Recovery getenv control-IN: ${result.responseBytes} bytes")
-                        logUi("build-version=${result.value.ifEmpty { "(empty)" }}")
+                        listOf("build-version", "build-style", "auto-boot").forEach { variable ->
+                            logUi("Recovery getenv probe: $variable")
+                            runCatching { recovery.getenv(variable) }
+                                .onSuccess { result ->
+                                    logUi("$variable control-OUT=${result.commandBytes} control-IN=${result.responseBytes} value=${result.value.ifEmpty { "(empty)" }}")
+                                }
+                                .onFailure { error ->
+                                    logUi("$variable failed: ${error.javaClass.simpleName}: ${error.message}")
+                                }
+                        }
                     }
                     AppleUsb.Mode.APPLE_OTHER -> logUi("Apple device is not classified as DFU/recovery; no command sent.")
                 }
