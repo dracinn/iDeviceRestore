@@ -70,11 +70,14 @@ class BetaFirmwareCatalog(
                 continue
             }
 
-            val fileSizeText = Regex(
-                "File\\s*size[^0-9]{0,120}([0-9]+(?:\\.[0-9]+)?)\\s*(GB|GiB|MB|MiB)",
-                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-            ).find(detail)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
-                ?: row.fileSizeText
+            val displayedSize = parseSize(row.fileSizeText)
+            val exactSize = probeAppleContentLength(appleUrl)
+            val firmwareSize = if (exactSize > 0L) exactSize else displayedSize
+            if (exactSize > 0L) {
+                logger("BetaFirmwareCatalog: Apple CDN exact payload size=$exactSize bytes")
+            } else {
+                logger("BetaFirmwareCatalog: Apple CDN size probe unavailable; using rounded index size=$displayedSize bytes")
+            }
 
             logger("BetaFirmwareCatalog: selected ${row.buildId}; payload host=$APPLE_CDN_HOST")
             return FirmwareCatalog.Firmware(
@@ -82,7 +85,7 @@ class BetaFirmwareCatalog(
                 version = row.version,
                 buildId = row.buildId,
                 url = appleUrl,
-                fileSize = parseSize(fileSizeText),
+                fileSize = firmwareSize,
                 sha1 = null,
                 releaseDate = parseDate(row.releaseDateText),
                 uploadDate = null,
@@ -186,6 +189,51 @@ class BetaFirmwareCatalog(
         return listOf(
             "signed", "&check;", "&#10003;", "&#x2713;", "✓", "check-circle", "circle-check", "text-success"
         ).any { normalized.contains(it) }
+    }
+
+    /** Ask Apple's CDN for the exact payload size without downloading the IPSW. */
+    private fun probeAppleContentLength(target: String): Long {
+        val head = (URL(target).openConnection() as HttpURLConnection).apply {
+            requestMethod = "HEAD"
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            instanceFollowRedirects = true
+            setRequestProperty("Accept-Encoding", "identity")
+            setRequestProperty("User-Agent", "iDeviceRestore-Android/${BuildConfig.VERSION_NAME}")
+        }
+        try {
+            val code = head.responseCode
+            logger("BetaFirmwareCatalog: Apple CDN HEAD HTTP $code ${head.responseMessage.orEmpty()}")
+            if (code in 200..399 && head.contentLengthLong > 0L) return head.contentLengthLong
+        } catch (t: Throwable) {
+            logger("BetaFirmwareCatalog: Apple CDN HEAD failed: ${t.javaClass.simpleName}: ${t.message}")
+        } finally {
+            head.disconnect()
+        }
+
+        val range = (URL(target).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            instanceFollowRedirects = true
+            setRequestProperty("Range", "bytes=0-0")
+            setRequestProperty("Accept-Encoding", "identity")
+            setRequestProperty("User-Agent", "iDeviceRestore-Android/${BuildConfig.VERSION_NAME}")
+        }
+        try {
+            val code = range.responseCode
+            logger("BetaFirmwareCatalog: Apple CDN range probe HTTP $code ${range.responseMessage.orEmpty()}")
+            val contentRange = range.getHeaderField("Content-Range").orEmpty()
+            val total = Regex("/([0-9]+)$").find(contentRange)?.groupValues?.get(1)?.toLongOrNull()
+            if (total != null && total > 0L) return total
+            if (code == HttpURLConnection.HTTP_OK && range.contentLengthLong > 0L) return range.contentLengthLong
+            range.inputStream?.use { input -> input.read() }
+        } catch (t: Throwable) {
+            logger("BetaFirmwareCatalog: Apple CDN range probe failed: ${t.javaClass.simpleName}: ${t.message}")
+        } finally {
+            range.disconnect()
+        }
+        return -1L
     }
 
     private fun parseDate(value: String): Instant? = runCatching {
