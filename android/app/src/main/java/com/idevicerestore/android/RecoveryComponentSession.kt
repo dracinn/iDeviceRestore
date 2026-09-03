@@ -38,6 +38,14 @@ class RecoveryComponentSession(
         val endpointAddress: Int
     )
 
+    data class AppleSiliconIbecExecution(
+        val goCommandBytes: Int,
+        val followUpTransfer: RecoveryTransport.ControlTransferResult?,
+        val followUpError: Throwable?
+    ) {
+        val followUpAccepted: Boolean get() = followUpTransfer != null
+    }
+
     private val uploader: RecoveryUploadTransport
     private var lastUpload: UploadedComponent? = null
 
@@ -81,18 +89,35 @@ class RecoveryComponentSession(
     }
 
     /**
-     * Executes an uploaded iBEC using the Apple Silicon bRequest=1 command path used upstream.
+     * Executes an uploaded iBEC using the exact Apple Silicon sequence used by idevicerestore:
+     * send `go` with bRequest=1, then issue a zero-length class/interface OUT transfer 0x21/1.
      *
-     * This does not upload iBEC and cannot be called unless this session successfully uploaded an
-     * iBEC immediately beforehand. The device is expected to disconnect/re-enumerate after `go`;
-     * callers must discard this UsbDeviceConnection when that happens.
+     * Upstream does not require the second transfer to return successfully because iBEC can reset
+     * USB immediately. We therefore expose its outcome but do not turn a disconnect into a failed
+     * execution after the `go` command itself was accepted.
      */
-    fun executeAppleSiliconIbec(): Int {
+    fun executeAppleSiliconIbec(): AppleSiliconIbecExecution {
         val uploaded = lastUpload ?: error("No Recovery component has been uploaded")
         check(uploaded.component == Component.IBEC) {
             "Refusing Apple Silicon iBEC execution: last uploaded component is ${uploaded.component}"
         }
-        return command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
+
+        val goBytes = command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
+        val followUp = runCatching {
+            command.controlTransferOut(
+                requestType = APPLE_SILICON_IBEC_FOLLOWUP_REQUEST_TYPE,
+                request = APPLE_SILICON_IBEC_FOLLOWUP_REQUEST,
+                value = 0,
+                index = 0,
+                data = null,
+                timeoutMs = APPLE_SILICON_IBEC_FOLLOWUP_TIMEOUT_MS
+            )
+        }
+        return AppleSiliconIbecExecution(
+            goCommandBytes = goBytes,
+            followUpTransfer = followUp.getOrNull(),
+            followUpError = followUp.exceptionOrNull()
+        )
     }
 
     /** Sends a component-specific iBoot command only after the expected component upload. */
@@ -103,5 +128,11 @@ class RecoveryComponentSession(
             "Refusing command '$ibootCommand': expected last upload $expected, got ${uploaded.component}"
         }
         return command.sendCommand(ibootCommand)
+    }
+
+    companion object {
+        private const val APPLE_SILICON_IBEC_FOLLOWUP_REQUEST_TYPE = 0x21
+        private const val APPLE_SILICON_IBEC_FOLLOWUP_REQUEST = 1
+        private const val APPLE_SILICON_IBEC_FOLLOWUP_TIMEOUT_MS = 5_000
     }
 }
