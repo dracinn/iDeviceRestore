@@ -38,7 +38,7 @@ class FirmwareStorage(
 
     private val preflightStarted = ConcurrentHashMap.newKeySet<String>()
     private val preflightExecutor = Executors.newSingleThreadExecutor()
-    private val operationStatus by lazy { OperationStatusNotifier(context.applicationContext) }
+    private val operationStatus by lazy { OperationStatusNotifier(context) }
 
     /** Existing user-visible project folder at the root of primary shared storage. */
     val projectRoot: File
@@ -131,6 +131,7 @@ class FirmwareStorage(
         val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
         if (!preflightStarted.add(key)) return
 
+        operationStatus.requestPermissionIfPossible()
         preflightExecutor.execute {
             logger("IPSW preflight: local firmware is complete; starting read-only manifest inspection")
             operationStatus.phase(
