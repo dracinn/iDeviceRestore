@@ -14,7 +14,8 @@ import java.util.Locale
  * Lightweight client for IPSW.dev's device beta index.
  *
  * This source is used only when the user explicitly enables beta firmware lookup.
- * The final payload URL must still resolve directly to Apple's HTTPS CDN.
+ * Signing state is read from the device index. The final payload URL must resolve directly to
+ * Apple's HTTPS firmware CDN; IPSW.dev is never used as the binary download host.
  */
 class BetaFirmwareCatalog(
     private val endpoint: String = "https://www.ipsw.dev",
@@ -26,7 +27,8 @@ class BetaFirmwareCatalog(
         val version: String,
         val buildId: String,
         val releaseDateText: String,
-        val fileSizeText: String
+        val fileSizeText: String,
+        val signed: Boolean
     )
 
     fun latestSigned(identifier: String): FirmwareCatalog.Firmware? {
@@ -38,30 +40,33 @@ class BetaFirmwareCatalog(
         logger("BetaFirmwareCatalog: received ${html.length} characters; parsing beta/RC rows")
 
         val rows = parseRows(html)
-        logger("BetaFirmwareCatalog: parsed ${rows.size} beta/RC candidate row(s)")
+        val signedRows = rows.filter { it.signed }
+        logger("BetaFirmwareCatalog: parsed ${rows.size} candidate row(s); ${signedRows.size} reported signed")
         if (rows.isEmpty()) error("No beta/RC firmware rows could be parsed for device")
 
-        for (row in rows.take(MAX_DETAIL_PROBES)) {
+        for (row in signedRows.take(MAX_DETAIL_PROBES)) {
             logger(
-                "BetaFirmwareCatalog: candidate ${row.version} (${row.buildId}) " +
+                "BetaFirmwareCatalog: signed candidate ${row.version} (${row.buildId}) " +
                     "released=${row.releaseDateText} size=${row.fileSizeText}"
             )
 
             val detailUrl = "$endpoint/download/$encoded/${row.buildId}"
             logger("BetaFirmwareCatalog: GET $detailUrl")
             val detail = get(detailUrl)
-            logger("BetaFirmwareCatalog: received ${detail.length} detail characters")
-
-            val signed = detail.contains("This firmware is signed", ignoreCase = true)
-            if (!signed) {
-                logger("BetaFirmwareCatalog: ${row.buildId} is not reported as signed; checking next candidate")
-                continue
-            }
+            logger("BetaFirmwareCatalog: received ${detail.length} detail characters; resolving Apple CDN URL")
 
             val appleUrl = Regex("https://updates\\.cdn-apple\\.com/[^\"'<>\\s]+", RegexOption.IGNORE_CASE)
                 .find(detail)?.value
             if (appleUrl == null) {
                 logger("BetaFirmwareCatalog: signed build ${row.buildId} has no Apple CDN URL; checking next candidate")
+                continue
+            }
+
+            val parsedUrl = URL(appleUrl)
+            if (!parsedUrl.protocol.equals("https", ignoreCase = true) ||
+                !parsedUrl.host.equals(APPLE_CDN_HOST, ignoreCase = true)
+            ) {
+                logger("BetaFirmwareCatalog: rejected non-Apple firmware URL for ${row.buildId}")
                 continue
             }
 
@@ -71,7 +76,7 @@ class BetaFirmwareCatalog(
             ).find(detail)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" }
                 ?: row.fileSizeText
 
-            logger("BetaFirmwareCatalog: selected signed build ${row.buildId}; Apple CDN URL resolved")
+            logger("BetaFirmwareCatalog: selected ${row.buildId}; payload host=$APPLE_CDN_HOST")
             return FirmwareCatalog.Firmware(
                 identifier = identifier,
                 version = row.version,
@@ -85,14 +90,14 @@ class BetaFirmwareCatalog(
             )
         }
 
-        logger("BetaFirmwareCatalog: no signed beta/RC with an Apple CDN URL found in first $MAX_DETAIL_PROBES candidates")
+        logger("BetaFirmwareCatalog: no signed beta/RC with an Apple CDN URL found in first $MAX_DETAIL_PROBES signed candidates")
         return null
     }
 
     /**
-     * Flatten only markup, then locate each beta/RC version and scan a bounded window after it for
-     * the build, release date, and size. IPSW.dev inserts accessibility/signing labels between
-     * those visible columns, so requiring the fields to be adjacent is too brittle.
+     * Parse version/build/date/size from bounded plain-text windows, then recover signing state from
+     * the raw table row containing each build ID. This avoids both page-wide regex backtracking and
+     * brittle dependence on a particular detail-page sentence.
      */
     private fun parseRows(html: String): List<ParsedRow> {
         val text = html
@@ -105,6 +110,8 @@ class BetaFirmwareCatalog(
             .replace("&check;", " ✓ ", ignoreCase = true)
             .replace("&#10003;", " ✓ ", ignoreCase = true)
             .replace("&#x2713;", " ✓ ", ignoreCase = true)
+            .replace("&#10007;", " ✗ ", ignoreCase = true)
+            .replace("&#x2717;", " ✗ ", ignoreCase = true)
             .replace(Regex("\\s+"), " ")
             .trim()
 
@@ -128,19 +135,25 @@ class BetaFirmwareCatalog(
                 val build = buildRegex.find(window, relativeVersionEnd) ?: return@forEach
                 val date = dateRegex.find(window, build.range.last + 1) ?: return@forEach
                 val size = sizeRegex.find(window, date.range.last + 1) ?: return@forEach
+                val signing = signingStateForBuild(html, build.value)
 
                 add(
                     ParsedRow(
                         version = versionMatch.value.trim().replace(Regex("\\s+"), " "),
                         buildId = build.value,
                         releaseDateText = date.value,
-                        fileSizeText = size.value
+                        fileSizeText = size.value,
+                        signed = signing
                     )
                 )
             }
         }.distinctBy { it.buildId }
 
-        if (rows.isEmpty()) {
+        if (rows.isNotEmpty()) {
+            rows.take(3).forEach { row ->
+                logger("BetaFirmwareCatalog: index ${row.buildId} signing=${if (row.signed) "signed" else "unsigned/unknown"}")
+            }
+        } else {
             val firstBeta = Regex("beta|RC", RegexOption.IGNORE_CASE).find(text)
             if (firstBeta != null) {
                 val start = maxOf(0, firstBeta.range.first - 100)
@@ -152,6 +165,27 @@ class BetaFirmwareCatalog(
         }
 
         return rows
+    }
+
+    private fun signingStateForBuild(html: String, buildId: String): Boolean {
+        val buildIndex = html.indexOf(buildId, ignoreCase = true)
+        if (buildIndex < 0) return false
+
+        val rowStart = html.lastIndexOf("<tr", startIndex = buildIndex, ignoreCase = true)
+        val rowEndTag = html.indexOf("</tr>", startIndex = buildIndex, ignoreCase = true)
+        if (rowStart < 0 || rowEndTag < 0 || rowEndTag - rowStart > MAX_RAW_ROW_CHARS) return false
+
+        val row = html.substring(rowStart, rowEndTag + 5)
+        val normalized = row.lowercase(Locale.US)
+
+        val explicitUnsigned = listOf(
+            "unsigned", "&#10007;", "&#x2717;", "✗", "xmark", "times-circle", "circle-xmark", "text-danger"
+        ).any { normalized.contains(it) }
+        if (explicitUnsigned) return false
+
+        return listOf(
+            "signed", "&check;", "&#10003;", "&#x2713;", "✓", "check-circle", "circle-check", "text-success"
+        ).any { normalized.contains(it) }
     }
 
     private fun parseDate(value: String): Instant? = runCatching {
@@ -197,5 +231,7 @@ class BetaFirmwareCatalog(
     companion object {
         private const val MAX_DETAIL_PROBES = 8
         private const val ROW_WINDOW_CHARS = 320
+        private const val MAX_RAW_ROW_CHARS = 16_384
+        private const val APPLE_CDN_HOST = "updates.cdn-apple.com"
     }
 }
