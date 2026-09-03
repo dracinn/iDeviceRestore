@@ -12,6 +12,7 @@ object AppleUsb {
     private val dfuPids = setOf(0x1227)
     private val recoveryPids = setOf(0x1280, 0x1281, 0x1282, 0x1283)
     private val wtfPids = setOf(0x1222)
+    private val bootIdRegex = Regex("\\b(CPID|CPRV|CPFM|SCEP|BDID|ECID|IBFL):([0-9A-Fa-f]+)\\b")
 
     enum class Mode { DFU, RECOVERY, WTF, APPLE_OTHER }
 
@@ -28,6 +29,25 @@ object AppleUsb {
         append(" interfaces=${device.interfaceCount}")
         runCatching { device.productName }.getOrNull()?.let { append(" product=$it") }
         runCatching { device.manufacturerName }.getOrNull()?.let { append(" manufacturer=$it") }
+    }
+
+    fun bootIdentifierSummary(device: UsbDevice): String {
+        val serial = runCatching { device.serialNumber }.getOrNull()
+            ?: return "USB serial descriptor: unavailable"
+        if (serial.isBlank()) return "USB serial descriptor: empty"
+
+        val identifiers = bootIdRegex.findAll(serial)
+            .associate { it.groupValues[1].uppercase() to it.groupValues[2].uppercase() }
+
+        return buildString {
+            append("USB serial descriptor: ").append(serial)
+            if (identifiers.isNotEmpty()) {
+                append("\nBoot identifiers:")
+                listOf("CPID", "CPRV", "CPFM", "SCEP", "BDID", "ECID", "IBFL").forEach { key ->
+                    identifiers[key]?.let { append(" $key=$it") }
+                }
+            }
+        }
     }
 
     fun interfaceSummary(device: UsbDevice): String = buildString {
@@ -87,7 +107,6 @@ object AppleUsb {
             val score = when (deviceMode) {
                 Mode.RECOVERY -> {
                     var s = 0
-                    // libirecovery uses interface 0 / alt 0 for classic 0x1280/0x1281 recovery.
                     if (intf.id == 0) s += 500
                     if (intf.alternateSetting == 0) s += 100
                     if (bulkIn != null) s += 20
