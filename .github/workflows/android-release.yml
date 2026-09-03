@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (for example 0.1.0)'
+        description: 'Release tag version, e.g. 0.1.0.1 (app still displays 0.1.0)'
         required: true
 
 permissions:
@@ -33,16 +33,33 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Resolve version
+      - name: Resolve release and app versions
         shell: bash
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION_NAME="${GITHUB_REF_NAME#v}"
+            RELEASE_VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION_NAME="${{ inputs.version }}"
+            RELEASE_VERSION="${{ inputs.version }}"
           fi
+
+          # Development releases may add a fourth numeric component so Obtainium
+          # sees a newer release while Android still displays the base x.y.z version.
+          # Example: v0.1.0.7 -> versionName 0.1.0, release version 0.1.0.7.
+          if [[ "$RELEASE_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(\.([0-9]+))?$ ]]; then
+            VERSION_NAME="${BASH_REMATCH[1]}"
+            PSEUDO_BUILD="${BASH_REMATCH[3]:-0}"
+          else
+            echo "Version must be x.y.z or x.y.z.N, for example 0.1.0.1"
+            exit 1
+          fi
+
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "PSEUDO_BUILD=$PSEUDO_BUILD" >> "$GITHUB_ENV"
+          # Android requires versionCode to increase for an APK update. The Actions
+          # run number is monotonic even while the visible versionName stays fixed.
           echo "VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "Release $RELEASE_VERSION -> app versionName $VERSION_NAME, versionCode ${GITHUB_RUN_NUMBER}"
 
       - name: Validate signing secrets
         env:
@@ -79,7 +96,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iDeviceRestore-${{ env.VERSION_NAME }}
+          name: iDeviceRestore-${{ env.RELEASE_VERSION }}
           path: iDeviceRestore.apk
           if-no-files-found: error
           retention-days: 30
@@ -90,4 +107,4 @@ jobs:
         with:
           files: iDeviceRestore.apk
           generate_release_notes: true
-          name: iDeviceRestore Android ${{ env.VERSION_NAME }}
+          name: iDeviceRestore Android ${{ env.RELEASE_VERSION }}
