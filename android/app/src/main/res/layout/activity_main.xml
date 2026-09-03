@@ -26,6 +26,11 @@
             android:layout_height="wrap_content"
             android:enabled="false"
             android:text="Probe DFU / Recovery" />
+        <Button
+            android:id="@+id/shareLogsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Share verbose logs" />
         <TextView
             android:id="@+id/logView"
             android:layout_width="match_parent"
