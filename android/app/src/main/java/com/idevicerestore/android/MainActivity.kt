@@ -317,10 +317,33 @@ class MainActivity : AppCompatActivity() {
 
                 when (AppleUsb.mode(device)) {
                     AppleUsb.Mode.DFU -> {
-                        logUi("Sending non-destructive DFU_GETSTATUS")
-                        runCatching { DfuTransport(connection).getStatus() }
-                            .onSuccess { s -> logUi("DFU status=${s.status}, state=${s.state}, poll=${s.pollTimeoutMs}ms, iString=${s.iString}") }
-                            .onFailure { logUi("DFU probe failed: ${it.javaClass.simpleName}: ${it.message}") }
+                        val dfu = DfuTransport(connection)
+                        logUi("DFU diagnostic: sending read-only DFU_GETSTATUS + DFU_GETSTATE")
+                        runCatching { dfu.getStatus() }
+                            .onSuccess { s ->
+                                logUi(
+                                    "DFU status=${s.status}(${s.statusName}) " +
+                                        "GETSTATE=${s.state}(${s.stateName}) " +
+                                        "GETSTATUS.state=${s.statusState}(${s.statusStateName}) " +
+                                        "consistent=${s.stateConsistent} poll=${s.pollTimeoutMs}ms iString=${s.iString}"
+                                )
+                            }
+                            .onFailure { logUi("DFU state/status probe failed: ${it.javaClass.simpleName}: ${it.message}") }
+
+                        logUi("DFU diagnostic: requesting read-only functional descriptor")
+                        runCatching { dfu.getFunctionalDescriptor(claimed.intf.id) }
+                            .onSuccess { descriptor ->
+                                logUi(
+                                    "DFU functional descriptor: version=${descriptor.versionText} " +
+                                        "transferSize=${descriptor.transferSize} detachTimeout=${descriptor.detachTimeoutMs}ms " +
+                                        "canDownload=${descriptor.canDownload} canUpload=${descriptor.canUpload} " +
+                                        "manifestationTolerant=${descriptor.manifestationTolerant} willDetach=${descriptor.willDetach}"
+                                )
+                            }
+                            .onFailure {
+                                logUi("DFU functional descriptor unavailable: ${it.javaClass.simpleName}: ${it.message}")
+                            }
+                        logUi("DFU diagnostic complete: no state-changing DFU request sent")
                     }
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
@@ -667,7 +690,7 @@ class MainActivity : AppCompatActivity() {
         val hadSelection = latestSignedFirmware != null || firmwareDestination != null
         latestSignedFirmware = null
         firmwareDestination = null
-        if (logChange && hadSelection) log("Firmware selection cleared: $reason")
+        if (logChange && hadSelection) logUi("Firmware selection cleared: $reason")
     }
 
     private fun updateFirmwareUi() {
