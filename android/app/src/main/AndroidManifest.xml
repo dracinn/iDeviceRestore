@@ -9,8 +9,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="iDeviceRestore"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+        android:label="iDeviceRestore">
         <activity
             android:name=".MainActivity"
             android:exported="true">
