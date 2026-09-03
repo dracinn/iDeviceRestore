@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.idevicerestore.android.databinding.ActivityMainBinding
@@ -117,7 +118,7 @@ class MainActivity : AppCompatActivity() {
         log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         log("Automatic DFU / Recovery probing: enabled")
-        log("Firmware selection: manual tap required each app session")
+        log("Firmware selection: manual catalog choice required each app session")
         log("Automatic pseudo-release pipeline: enabled")
         log("Shared diagnostic privacy redaction: enabled")
         log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
@@ -446,15 +447,159 @@ class MainActivity : AppCompatActivity() {
 
         firmwareSelectionInFlight = true
         binding.selectFirmwareButton.isEnabled = false
-        binding.firmwareStatus.text = "Checking signed firmware catalog…"
-        log("Firmware selection requested by user for ${device.identifier}")
+        binding.firmwareStatus.text = "Loading signed firmware catalog…"
+        log("Firmware catalog chooser requested by user for ${device.identifier}")
         worker.execute {
-            try {
-                lookupPreferredFirmware(device.identifier)
-            } finally {
-                firmwareSelectionInFlight = false
-                runOnUiThread { updateFirmwareUi() }
+            val choices = loadFirmwareChoices(device.identifier)
+            firmwareSelectionInFlight = false
+            runOnUiThread {
+                updateFirmwareUi()
+                if (identifiedDevice?.identifier != device.identifier) {
+                    log("Firmware chooser discarded: connected device changed")
+                } else if (choices.isEmpty()) {
+                    log("Firmware catalog chooser: no signed firmware entries available")
+                    binding.firmwareStatus.text = "No signed firmware reported"
+                } else {
+                    showFirmwareChooser(device.identifier, choices)
+                }
             }
+        }
+    }
+
+    private fun loadFirmwareChoices(identifier: String): List<FirmwareSelectionCandidate> {
+        logUi("Firmware catalog: loading all signed stable IPSWs for $identifier")
+        val stable = runCatching { firmwareCatalog.firmwares(identifier, signedOnly = true) }
+            .onFailure { error ->
+                logUi("Signed stable firmware list failed: ${error.javaClass.simpleName}: ${error.message}")
+            }
+            .getOrDefault(emptyList())
+        logUi("Firmware catalog: ${stable.size} signed stable build(s) available")
+
+        val choices = mutableListOf<FirmwareSelectionCandidate>()
+        stable.forEach { firmware ->
+            choices += FirmwareSelectionCandidate(
+                channel = FirmwareSelectionCandidate.Channel.STABLE,
+                version = firmware.version,
+                buildId = firmware.buildId,
+                releaseDate = firmware.releaseDate,
+                fileSize = firmware.fileSize,
+                stableFirmware = firmware
+            )
+        }
+
+        if (appSettings.includeBetaFirmware) {
+            logUi("Beta/RC catalog: loading all signed candidates for $identifier")
+            val betaCandidates = runCatching { betaFirmwareCatalog.signedCandidates(identifier) }
+                .onFailure { error ->
+                    logUi("Beta/RC firmware list failed: ${error.javaClass.simpleName}: ${error.message}")
+                }
+                .getOrDefault(emptyList())
+            logUi("Beta/RC catalog: ${betaCandidates.size} signed beta/RC build(s) available")
+            betaCandidates.forEach { candidate ->
+                val channel = if (candidate.version.contains("RC", ignoreCase = true)) {
+                    FirmwareSelectionCandidate.Channel.RC
+                } else {
+                    FirmwareSelectionCandidate.Channel.BETA
+                }
+                choices += FirmwareSelectionCandidate(
+                    channel = channel,
+                    version = candidate.version,
+                    buildId = candidate.buildId,
+                    releaseDate = candidate.releaseDate,
+                    fileSize = candidate.fileSize,
+                    betaCandidate = candidate
+                )
+            }
+        }
+
+        return choices
+            .distinctBy { "${it.channel}:${it.buildId}" }
+            .sortedWith(
+                compareByDescending<FirmwareSelectionCandidate> { it.releaseDate ?: Instant.EPOCH }
+                    .thenByDescending { it.version }
+                    .thenByDescending { it.buildId }
+            )
+    }
+
+    private fun showFirmwareChooser(identifier: String, choices: List<FirmwareSelectionCandidate>) {
+        val labels = choices.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Select signed firmware")
+            .setItems(labels) { _, index ->
+                resolveFirmwareChoice(identifier, choices[index])
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                log("Firmware catalog chooser cancelled")
+            }
+            .show()
+        log("Firmware catalog chooser: showing ${choices.size} signed build(s)")
+    }
+
+    private fun resolveFirmwareChoice(identifier: String, choice: FirmwareSelectionCandidate) {
+        if (firmwareSelectionInFlight) return
+        firmwareSelectionInFlight = true
+        binding.selectFirmwareButton.isEnabled = false
+        binding.firmwareStatus.text = "Resolving ${choice.version} (${choice.buildId})…"
+        log("Firmware chosen by user: ${choice.channel} ${choice.version} (${choice.buildId})")
+
+        worker.execute {
+            val firmware = when (choice.channel) {
+                FirmwareSelectionCandidate.Channel.STABLE -> choice.stableFirmware
+                FirmwareSelectionCandidate.Channel.BETA,
+                FirmwareSelectionCandidate.Channel.RC -> choice.betaCandidate?.let { candidate ->
+                    runCatching { betaFirmwareCatalog.resolveSigned(identifier, candidate) }
+                        .onFailure { error ->
+                            logUi("Selected beta/RC resolution failed: ${error.javaClass.simpleName}: ${error.message}")
+                        }
+                        .getOrNull()
+                }
+            }
+
+            if (firmware == null) {
+                logUi("Selected firmware could not be resolved to an Apple CDN payload")
+            } else {
+                applyFirmwareSelection(firmware, choice.channel)
+            }
+
+            firmwareSelectionInFlight = false
+            runOnUiThread { updateFirmwareUi() }
+        }
+    }
+
+    private fun applyFirmwareSelection(
+        firmware: FirmwareCatalog.Firmware,
+        channel: FirmwareSelectionCandidate.Channel
+    ) {
+        latestSignedFirmware = firmware
+        logUi("Selected signed firmware (${channel.name.lowercase(Locale.US)}): ${firmware.version} (${firmware.buildId})")
+        logUi("Selected signed firmware URL: ${firmware.url}")
+
+        if (firmwareStorage.hasSharedStorageAccess()) {
+            runCatching { firmwareStorage.locationFor(firmware) }
+                .onSuccess { location ->
+                    firmwareWorkspace = location.workspace
+                    firmwareDestination = location.file
+                    logUi("Firmware download destination: ${location.file.absolutePath}")
+                    val present = location.file.isFile
+                    if (present) {
+                        logUi("Firmware file found: ${location.file.length()} bytes")
+                        if (firmware.fileSize > 0L && location.file.length() == firmware.fileSize) {
+                            logUi("Firmware file status: ready (exact Apple/catalog size match)")
+                        } else if (firmware.fileSize > 0L) {
+                            logUi("Firmware file status: size mismatch expected=${firmware.fileSize} actual=${location.file.length()}")
+                        }
+                    } else {
+                        val partial = firmwareStorage.partialBytes(firmware)
+                        if (partial > 0L) logUi("Firmware partial download found: $partial bytes; resume available")
+                    }
+                }
+                .onFailure { error ->
+                    firmwareDestination = null
+                    logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
+                }
+        } else {
+            firmwareDestination = null
+            logUi("Firmware destination pending shared storage permission")
         }
     }
 
@@ -465,90 +610,16 @@ class MainActivity : AppCompatActivity() {
         if (logChange && hadSelection) log("Firmware selection cleared: $reason")
     }
 
-    private fun lookupPreferredFirmware(identifier: String) {
-        logUi("Firmware catalog: checking latest signed stable IPSW for $identifier")
-        val stable = runCatching { firmwareCatalog.latestSigned(identifier) }
-            .onFailure { error ->
-                logUi("Signed stable firmware lookup failed: ${error.javaClass.simpleName}: ${error.message}")
-            }
-            .getOrNull()
-
-        stable?.let {
-            val size = if (it.fileSize >= 0) " size=${it.fileSize} bytes" else ""
-            logUi("Latest signed stable firmware: ${it.version} (${it.buildId})$size")
-        }
-
-        var preferred = stable
-        if (appSettings.includeBetaFirmware) {
-            logUi("Beta/RC firmware lookup enabled: checking signed beta index for $identifier")
-            val beta = runCatching { betaFirmwareCatalog.latestSigned(identifier) }
-                .onFailure { error ->
-                    logUi("Beta/RC lookup unavailable: ${error.javaClass.simpleName}: ${error.message}")
-                }
-                .getOrNull()
-
-            beta?.let {
-                val size = if (it.fileSize >= 0) " size=${it.fileSize} bytes" else ""
-                logUi("Latest signed beta/RC firmware: ${it.version} (${it.buildId})$size")
-                preferred = chooseNewestSigned(stable, it)
-            }
-        }
-
-        latestSignedFirmware = preferred
-        if (preferred == null) {
-            logUi("Latest signed firmware: none reported")
-            firmwareDestination = null
-            runOnUiThread { updateFirmwareUi() }
-            return
-        }
-
-        val channel = if (preferred.version.contains("beta", ignoreCase = true) || preferred.version.contains("RC", ignoreCase = true)) {
-            "beta/RC"
-        } else {
-            "stable"
-        }
-        logUi("Selected signed firmware ($channel): ${preferred.version} (${preferred.buildId})")
-        logUi("Selected signed firmware URL: ${preferred.url}")
-
-        if (firmwareStorage.hasSharedStorageAccess()) {
-            runCatching { firmwareStorage.locationFor(preferred) }
-                .onSuccess { location ->
-                    firmwareWorkspace = location.workspace
-                    firmwareDestination = location.file
-                    logUi("Firmware download destination: ${location.file.absolutePath}")
-                    val present = location.file.isFile
-                    if (present) {
-                        logUi("Firmware file found: ${location.file.length()} bytes")
-                        if (preferred.fileSize > 0L && location.file.length() == preferred.fileSize) {
-                            logUi("Firmware file status: ready (exact Apple/catalog size match)")
-                        } else if (preferred.fileSize > 0L) {
-                            logUi("Firmware file status: size mismatch expected=${preferred.fileSize} actual=${location.file.length()}")
-                        }
-                    } else {
-                        val partial = firmwareStorage.partialBytes(preferred)
-                        if (partial > 0L) logUi("Firmware partial download found: $partial bytes; resume available")
-                    }
-                    runOnUiThread { updateFirmwareUi() }
-                }
-                .onFailure { error ->
-                    logUi("Firmware destination setup failed: ${error.javaClass.simpleName}: ${error.message}")
-                    runOnUiThread { updateFirmwareUi() }
-                }
-        } else {
-            logUi("Firmware destination pending shared storage permission")
-            runOnUiThread { updateFirmwareUi() }
-        }
-    }
-
     private fun updateFirmwareUi() {
         val firmware = latestSignedFirmware
         val destination = firmwareDestination
         binding.selectFirmwareButton.isEnabled = identifiedDevice != null && !firmwareSelectionInFlight && !firmwareDownloadActive
 
         if (firmware == null || destination == null) {
-            binding.firmwareTitle.text = "Firmware"
+            binding.firmwareTitle.text = firmware?.let { "Firmware ${it.version} (${it.buildId})" } ?: "Firmware"
             binding.firmwareStatus.text = when {
-                firmwareSelectionInFlight -> "Checking signed firmware catalog…"
+                firmwareSelectionInFlight -> "Loading or resolving firmware catalog…"
+                firmware != null -> "Firmware selected — storage destination unavailable"
                 identifiedDevice != null -> "Device identified — tap Select signed firmware"
                 else -> "Waiting for device identification"
             }
@@ -690,16 +761,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun chooseNewestSigned(
-        stable: FirmwareCatalog.Firmware?,
-        beta: FirmwareCatalog.Firmware
-    ): FirmwareCatalog.Firmware {
-        if (stable == null) return beta
-        val stableDate = stable.releaseDate ?: Instant.EPOCH
-        val betaDate = beta.releaseDate ?: Instant.EPOCH
-        return if (betaDate.isAfter(stableDate)) beta else stable
-    }
-
     private fun finishProbe(device: UsbDevice) = runOnUiThread {
         probeInFlight = false
         binding.probeButton.isEnabled = selected?.deviceName == device.deviceName && usbManager.hasPermission(device)
@@ -717,7 +778,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("Shared storage access: ${if (firmwareStorage.hasSharedStorageAccess()) "granted" else "not granted"}")
             appendLine("Project root: ${firmwareStorage.projectRoot.absolutePath}")
             appendLine("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
-            appendLine("Firmware selection mode: manual")
+            appendLine("Firmware selection mode: manual catalog chooser")
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Selected signed firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
