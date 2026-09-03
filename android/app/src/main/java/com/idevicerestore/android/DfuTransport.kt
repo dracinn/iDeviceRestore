@@ -90,6 +90,12 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
     }
 
     /**
+     * Reads Apple NONC/SNON using the same USB string-descriptor source as libirecovery.
+     * This is a standard device-to-host GET_DESCRIPTOR operation and does not change DFU state.
+     */
+    fun getNonceInfo(): DfuNonceInfo.Snapshot = DfuNonceInfo.fromConnection(connection)
+
+    /**
      * Requests the standard 9-byte DFU functional descriptor for an interface.
      * GET_DESCRIPTOR is read-only. Some bootloaders may stall this request; callers
      * should treat that as descriptor-unavailable rather than a DFU failure.
