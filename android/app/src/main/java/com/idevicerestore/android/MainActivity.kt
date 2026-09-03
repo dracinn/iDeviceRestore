@@ -323,15 +323,44 @@ class MainActivity : AppCompatActivity() {
                     }
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
-                        listOf("build-version", "build-style", "auto-boot").forEach { variable ->
-                            logUi("Recovery getenv probe: $variable")
-                            runCatching { recovery.getenv(variable) }
-                                .onSuccess { result ->
-                                    logUi("$variable control-OUT=${result.commandBytes} control-IN=${result.responseBytes} value=${result.value.ifEmpty { "(empty)" }}")
+                        val snapshot = RecoveryDiagnosticSession(device, connection, recovery).snapshot()
+                        snapshot.variables.forEach { variable ->
+                            logUi("Recovery getenv probe: ${variable.name}")
+                            val result = variable.result
+                            if (result != null) {
+                                logUi(
+                                    "${variable.name} control-OUT=${result.commandBytes} " +
+                                        "control-IN=${result.responseBytes} value=${result.value.ifEmpty { "(empty)" }}"
+                                )
+                            } else {
+                                val error = variable.error
+                                logUi("${variable.name} failed: ${error?.javaClass?.simpleName ?: "unknown"}: ${error?.message ?: "unknown error"}")
+                            }
+                        }
+
+                        if (AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY) {
+                            val console = snapshot.console
+                            when {
+                                console != null -> {
+                                    logUi(
+                                        "Recovery console: claimed interface id=${console.interfaceId} " +
+                                            "alt=${console.alternateSetting} bulk-IN=0x%02x".format(console.endpointAddress)
+                                    )
+                                    logUi("Recovery console: read ${console.bytes} byte(s) from bulk-IN")
+                                    if (console.text.isNotEmpty()) {
+                                        logUi("Recovery console data:\n${console.text}")
+                                    } else {
+                                        logUi("Recovery console: no pending data within read timeout")
+                                    }
                                 }
-                                .onFailure { error ->
-                                    logUi("$variable failed: ${error.javaClass.simpleName}: ${error.message}")
+                                snapshot.consoleError != null -> {
+                                    val error = snapshot.consoleError
+                                    logUi("Recovery console failed: ${error.javaClass.simpleName}: ${error.message}")
                                 }
+                                else -> logUi("Recovery console: secondary bulk-IN interface could not be claimed")
+                            }
+                        } else {
+                            logUi("Recovery console: skipped in WTF mode")
                         }
                     }
                     AppleUsb.Mode.APPLE_OTHER -> logUi("Apple device is not classified as DFU/recovery; no command sent.")
