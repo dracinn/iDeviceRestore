@@ -109,6 +109,34 @@ class FirmwareCatalog(
 
     fun latestSigned(identifier: String): Firmware? = firmwares(identifier, signedOnly = true).firstOrNull()
 
+    /**
+     * Freshly re-check a build's signing state and Apple payload before it may become active.
+     * Cached metadata is never accepted as proof that a firmware is still signed.
+     */
+    fun reverifySigned(identifier: String, buildId: String): Firmware? {
+        logger("FirmwareCatalog: reverify signed build $buildId for $identifier")
+        val current = firmwares(identifier, signedOnly = true)
+            .firstOrNull { it.buildId.equals(buildId, ignoreCase = true) }
+        if (current == null) {
+            logger("FirmwareCatalog: reverify failed; $buildId is not currently reported signed")
+            return null
+        }
+        val parsed = URL(current.url)
+        if (!parsed.protocol.equals("https", ignoreCase = true) ||
+            !parsed.host.equals(APPLE_CDN_HOST, ignoreCase = true)
+        ) {
+            logger("FirmwareCatalog: reverify rejected non-Apple CDN URL for $buildId")
+            return null
+        }
+        val exactSize = probeAppleContentLength(current.url)
+        if (exactSize <= 0L) {
+            logger("FirmwareCatalog: reverify failed; Apple CDN payload could not be verified for $buildId")
+            return null
+        }
+        logger("FirmwareCatalog: reverify passed for $buildId; Apple payload size=$exactSize bytes")
+        return current.copy(fileSize = exactSize, signed = true)
+    }
+
     /** Simple JSON cache/export for diagnostics and future offline browsing. */
     fun writeDeviceFirmwareCache(identifier: String, destination: File) {
         val entries = firmwares(identifier)
@@ -151,6 +179,27 @@ class FirmwareCatalog(
         )
     }
 
+    private fun probeAppleContentLength(target: String): Long {
+        val head = (URL(target).openConnection() as HttpURLConnection).apply {
+            requestMethod = "HEAD"
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            instanceFollowRedirects = true
+            setRequestProperty("Accept-Encoding", "identity")
+            setRequestProperty("User-Agent", "iDeviceRestore-Android/${BuildConfig.VERSION_NAME}")
+        }
+        try {
+            val code = head.responseCode
+            logger("FirmwareCatalog: Apple CDN HEAD HTTP $code ${head.responseMessage.orEmpty()}")
+            if (code in 200..399 && head.contentLengthLong > 0L) return head.contentLengthLong
+        } catch (t: Throwable) {
+            logger("FirmwareCatalog: Apple CDN HEAD failed: ${t.javaClass.simpleName}: ${t.message}")
+        } finally {
+            head.disconnect()
+        }
+        return -1L
+    }
+
     private fun get(target: String): String {
         val connection = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -182,4 +231,8 @@ class FirmwareCatalog(
 
     private fun JSONObject.optInstant(key: String): Instant? =
         optNullableString(key)?.let { runCatching { Instant.parse(it) }.getOrNull() }
+
+    companion object {
+        private const val APPLE_CDN_HOST = "updates.cdn-apple.com"
+    }
 }
