@@ -44,9 +44,19 @@ object TssRequestFoundation {
         val ready: Boolean get() = parameters != null && reasons.isEmpty()
     }
 
-    fun build(device: UsbDevice, preflight: IpswPreflight.Result): Readiness {
+    /**
+     * Fallback builder for callers without an open USB connection. A live DFU path should call the
+     * overload that accepts [DfuNonceInfo.Snapshot] from DfuNonceInfo.fromConnection().
+     */
+    fun build(device: UsbDevice, preflight: IpswPreflight.Result): Readiness =
+        build(device, preflight, DfuNonceInfo.fromDevice(device))
+
+    fun build(
+        device: UsbDevice,
+        preflight: IpswPreflight.Result,
+        nonces: DfuNonceInfo.Snapshot
+    ): Readiness {
         val ids = AppleUsb.bootIdentifiers(device)
-        val nonces = DfuNonceInfo.fromDevice(device)
         val reasons = mutableListOf<String>()
 
         val ecid = ids?.ecidHex?.toULongOrNull(16)
@@ -58,13 +68,14 @@ object TssRequestFoundation {
         val boardId = preflight.boardId ?: ids?.bdid?.toLong()
         if (boardId == null) reasons += "ApBoardID unavailable"
 
-        // SDOM is present in the same Apple boot descriptor used by libirecovery. AppleUsb does not
-        // currently expose it as a typed field, so parse it without altering the established identity API.
+        // SDOM is present in the Apple boot serial descriptor used for hardware identity.
         val securityDomain = parseHexTag(ids?.rawSerial.orEmpty(), "SDOM")?.toLong()
         if (securityDomain == null) reasons += "ApSecurityDomain unavailable"
 
         val apNonce = nonces.apNonce
-        if (apNonce.isNullOrEmpty()) reasons += "ApNonce (NONC) unavailable in current boot descriptor"
+        if (apNonce.isNullOrEmpty()) {
+            reasons += "ApNonce (NONC) unavailable from ${nonces.source}"
+        }
 
         if (reasons.isNotEmpty()) return Readiness(null, reasons)
 
