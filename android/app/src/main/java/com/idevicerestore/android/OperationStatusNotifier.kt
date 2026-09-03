@@ -1,6 +1,7 @@
 package com.idevicerestore.android
 
 import android.Manifest
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -8,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
@@ -23,6 +25,20 @@ class OperationStatusNotifier(private val context: Context) {
 
     init {
         createChannel()
+    }
+
+    fun requestPermissionIfPossible() {
+        if (Build.VERSION.SDK_INT < 33 || notificationsAllowed()) return
+        val activity = context as? Activity ?: return
+        activity.runOnUiThread {
+            if (ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_NOTIFICATIONS
+                )
+            }
+        }
     }
 
     fun phase(title: String, detail: String, progress: Int? = null, ongoing: Boolean = true) {
@@ -119,5 +135,6 @@ class OperationStatusNotifier(private val context: Context) {
     companion object {
         const val CHANNEL_ID = "restore_progress"
         private const val NOTIFICATION_ID = 4109
+        private const val REQUEST_NOTIFICATIONS = 4110
     }
 }
