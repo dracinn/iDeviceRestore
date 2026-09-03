@@ -7,12 +7,17 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
     data class Status(
         val status: Int,
         val pollTimeoutMs: Int,
+        /** Explicit DFU_GETSTATE result. */
         val state: Int,
+        /** State byte returned inside DFU_GETSTATUS. */
+        val statusState: Int,
         val iString: Int,
         val raw: ByteArray
     ) {
         val statusName: String get() = statusName(status)
         val stateName: String get() = stateName(state)
+        val statusStateName: String get() = stateName(statusState)
+        val stateConsistent: Boolean get() = state == statusState
     }
 
     data class State(
@@ -22,7 +27,10 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
         val name: String get() = stateName(value)
     }
 
-    /** DFU class GETSTATUS (bRequest=3). This does not change device state. */
+    /**
+     * Reads both DFU_GETSTATUS and DFU_GETSTATE. Both requests are device-to-host
+     * class requests and do not upload firmware or change DFU state.
+     */
     fun getStatus(): Status {
         val data = ByteArray(6)
         val n = connection.controlTransfer(
@@ -38,10 +46,13 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
         val poll = (data[1].toInt() and 0xff) or
             ((data[2].toInt() and 0xff) shl 8) or
             ((data[3].toInt() and 0xff) shl 16)
+        val statusState = data[4].toInt() and 0xff
+        val explicitState = getState().value
         return Status(
             status = data[0].toInt() and 0xff,
             pollTimeoutMs = poll,
-            state = data[4].toInt() and 0xff,
+            state = explicitState,
+            statusState = statusState,
             iString = data[5].toInt() and 0xff,
             raw = data
         )
