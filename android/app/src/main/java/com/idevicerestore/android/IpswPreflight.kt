@@ -141,13 +141,17 @@ class IpswPreflight(
     private fun parseXmlPlist(bytes: ByteArray): Any? {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
             setFeature("http://xml.org/sax/features/external-general-entities", false)
             setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
             isXIncludeAware = false
             isExpandEntityReferences = false
         }
-        val document = factory.newDocumentBuilder().parse(bytes.inputStream())
+        val builder = factory.newDocumentBuilder().apply {
+            setEntityResolver { _, _ -> org.xml.sax.InputSource(java.io.StringReader("")) }
+        }
+        val document = builder.parse(bytes.inputStream())
         val plist = document.documentElement
         val child = elementChildren(plist).firstOrNull() ?: error("Empty plist")
         return parseElement(child)
