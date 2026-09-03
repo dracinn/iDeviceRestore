@@ -11,6 +11,9 @@ import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.idevicerestore.android.databinding.ActivityMainBinding
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -18,6 +21,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var usbManager: UsbManager
     private var selected: UsbDevice? = null
     private val worker = Executors.newSingleThreadExecutor()
+    private val logBuffer = StringBuilder()
 
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
@@ -33,8 +37,14 @@ class MainActivity : AppCompatActivity() {
                         showSelected(device)
                     }
                 }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> scan()
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> scan()
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    log("USB device attached")
+                    scan()
+                }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    log("USB device detached")
+                    scan()
+                }
             }
         }
     }
@@ -55,6 +65,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.scanButton.setOnClickListener { scan() }
         binding.probeButton.setOnClickListener { probeSelected() }
+        binding.shareLogsButton.setOnClickListener { shareLogs() }
+
+        log("iDeviceRestore diagnostic session started")
+        log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
         scan()
     }
 
@@ -67,7 +82,10 @@ class MainActivity : AppCompatActivity() {
     private fun scan() {
         val apple = usbManager.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID }
         log("Scan: ${apple.size} Apple USB device(s)")
-        apple.forEach { log(AppleUsb.describe(it)) }
+        apple.forEach { device ->
+            log(AppleUsb.describe(device))
+            log(AppleUsb.interfaceSummary(device))
+        }
         val preferred = apple.firstOrNull { AppleUsb.mode(it) != AppleUsb.Mode.APPLE_OTHER } ?: apple.firstOrNull()
         selected = preferred
         if (preferred == null) {
@@ -82,10 +100,12 @@ class MainActivity : AppCompatActivity() {
     private fun showSelected(device: UsbDevice) {
         binding.status.text = AppleUsb.describe(device)
         binding.probeButton.isEnabled = usbManager.hasPermission(device)
-        log(AppleUsb.interfaceSummary(device))
+        log("Selected: ${AppleUsb.describe(device)}")
+        log("USB permission present: ${usbManager.hasPermission(device)}")
     }
 
     private fun requestPermission(device: UsbDevice) {
+        log("Requesting USB permission for ${device.deviceName}")
         val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         val pi = PendingIntent.getBroadcast(this, 0, Intent(permissionAction).setPackage(packageName), flags)
         usbManager.requestPermission(device, pi)
@@ -93,26 +113,31 @@ class MainActivity : AppCompatActivity() {
 
     private fun probeSelected() {
         val device = selected ?: return
+        log("Probe requested: mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
         worker.execute {
             val connection = usbManager.openDevice(device)
             if (connection == null) {
                 logUi("openDevice failed")
                 return@execute
             }
+            logUi("openDevice succeeded")
             try {
                 val claimed = AppleUsb.claimBestInterface(device, connection)
                 if (claimed == null) {
                     logUi("Could not claim a USB interface")
                     return@execute
                 }
-                logUi("Claimed interface ${claimed.intf.id}")
+                logUi("Claimed interface ${claimed.intf.id}; class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}")
+                logUi("Claimed bulk IN: ${claimed.bulkIn?.let { "0x%02x maxPacket=${it.maxPacketSize}".format(it.address) } ?: "none"}")
                 when (AppleUsb.mode(device)) {
                     AppleUsb.Mode.DFU -> {
+                        logUi("Sending non-destructive DFU_GETSTATUS")
                         runCatching { DfuTransport(connection).getStatus() }
                             .onSuccess { s -> logUi("DFU status=${s.status}, state=${s.state}, poll=${s.pollTimeoutMs}ms, iString=${s.iString}") }
-                            .onFailure { logUi("DFU probe failed: ${it.message}") }
+                            .onFailure { logUi("DFU probe failed: ${it.javaClass.simpleName}: ${it.message}") }
                     }
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
+                        logUi("Sending recovery command: getenv build-version")
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
                         val sent = recovery.sendCommand("getenv build-version")
                         logUi("Recovery command write: $sent bytes")
@@ -120,10 +145,33 @@ class MainActivity : AppCompatActivity() {
                     }
                     AppleUsb.Mode.APPLE_OTHER -> logUi("Apple device is not classified as DFU/recovery; no command sent.")
                 }
+            } catch (t: Throwable) {
+                logUi("Probe exception: ${t.javaClass.name}: ${t.message}")
+                logUi(t.stackTraceToString())
             } finally {
                 connection.close()
+                logUi("USB connection closed")
             }
         }
+    }
+
+    private fun shareLogs() {
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
+        val report = buildString {
+            appendLine("iDeviceRestore verbose diagnostic log")
+            appendLine("Generated: $timestamp")
+            appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
+            appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("---")
+            append(logBuffer.toString())
+        }
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "iDeviceRestore diagnostic log")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(Intent.createChooser(share, "Share verbose logs"))
     }
 
     private fun Intent.usbDevice(): UsbDevice? = if (Build.VERSION.SDK_INT >= 33) {
@@ -133,7 +181,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun log(message: String) {
-        binding.logView.append(message.trimEnd() + "\n")
+        val clean = message.trimEnd()
+        logBuffer.append(clean).append('\n')
+        binding.logView.append(clean + "\n")
     }
 
     private fun logUi(message: String) = runOnUiThread { log(message) }
