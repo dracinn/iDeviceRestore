@@ -79,8 +79,6 @@ object DfuNonceInfo {
             (languageDescriptor[2].toInt() and 0xFF) or
                 ((languageDescriptor[3].toInt() and 0xFF) shl 8)
         } else {
-            // libusb_get_string_descriptor_ascii() resolves a language internally. English-US is
-            // a safe standards-compatible fallback if descriptor zero is unavailable on Android.
             DEFAULT_LANGUAGE_ID
         }
 
@@ -102,16 +100,14 @@ object DfuNonceInfo {
 
         val declaredLength = data[0].toInt() and 0xFF
         val actualLength = minOf(received, declaredLength.takeIf { it >= 2 } ?: received)
-        val payloadLength = (actualLength - 2).coerceAtLeast(0) and -2
+        val payloadLength = ((actualLength - 2).coerceAtLeast(0) / 2) * 2
         if (payloadLength == 0) return ""
 
-        return String(data, 2, payloadLength, UTF16_LE)
-            .trimEnd('\u0000')
+        return String(data, 2, payloadLength, UTF16_LE).trimEnd('\u0000')
     }
 
     private fun parseTag(buffer: String, tag: String): ByteArray? {
         if (buffer.isBlank()) return null
-        // Match libirecovery's TAG:<hex> semantics while tolerating punctuation after the value.
         val match = Regex("(?:^|\\s)${Regex.escape(tag)}:([0-9A-Fa-f]+)")
             .find(buffer) ?: return null
         val hex = match.groupValues[1]
