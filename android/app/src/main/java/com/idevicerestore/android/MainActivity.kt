@@ -23,6 +23,10 @@ class MainActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val logBuffer = StringBuilder()
 
+    @Volatile
+    private var probeInFlight = false
+    private var lastAutoProbeDeviceName: String? = null
+
     private val permissionAction by lazy { "${packageName}.USB_PERMISSION" }
 
     private val receiver = object : BroadcastReceiver() {
@@ -36,14 +40,20 @@ class MainActivity : AppCompatActivity() {
                         selected = device
                         showSelected(device)
                         log(AppleUsb.bootIdentifierSummary(device))
+                        maybeAutoProbe(device, "permission granted")
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    log("USB device attached")
+                    val device = intent.usbDevice()
+                    log("USB device attached: ${device?.deviceName ?: "unknown"}")
                     scan()
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    log("USB device detached")
+                    val device = intent.usbDevice()
+                    log("USB device detached: ${device?.deviceName ?: "unknown"}")
+                    if (device != null && device.deviceName == lastAutoProbeDeviceName) {
+                        lastAutoProbeDeviceName = null
+                    }
                     scan()
                 }
             }
@@ -65,12 +75,13 @@ class MainActivity : AppCompatActivity() {
         else @Suppress("DEPRECATION") registerReceiver(receiver, filter)
 
         binding.scanButton.setOnClickListener { scan() }
-        binding.probeButton.setOnClickListener { probeSelected() }
+        binding.probeButton.setOnClickListener { probeSelected(manual = true) }
         binding.shareLogsButton.setOnClickListener { shareLogs() }
 
         log("iDeviceRestore diagnostic session started")
         log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         log("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}; device=${Build.MANUFACTURER} ${Build.MODEL}")
+        log("Automatic DFU / Recovery probing: enabled")
         scan()
     }
 
@@ -91,17 +102,22 @@ class MainActivity : AppCompatActivity() {
         val preferred = apple.firstOrNull { AppleUsb.mode(it) != AppleUsb.Mode.APPLE_OTHER } ?: apple.firstOrNull()
         selected = preferred
         if (preferred == null) {
+            lastAutoProbeDeviceName = null
             binding.status.text = "No Apple USB device found"
             binding.probeButton.isEnabled = false
             return
         }
         showSelected(preferred)
-        if (!usbManager.hasPermission(preferred)) requestPermission(preferred)
+        if (!usbManager.hasPermission(preferred)) {
+            requestPermission(preferred)
+        } else {
+            maybeAutoProbe(preferred, "device discovered")
+        }
     }
 
     private fun showSelected(device: UsbDevice) {
         binding.status.text = AppleUsb.describe(device)
-        binding.probeButton.isEnabled = usbManager.hasPermission(device)
+        binding.probeButton.isEnabled = usbManager.hasPermission(device) && !probeInFlight
         log("Selected: ${AppleUsb.describe(device)}")
         log("USB permission present: ${usbManager.hasPermission(device)}")
     }
@@ -113,13 +129,48 @@ class MainActivity : AppCompatActivity() {
         usbManager.requestPermission(device, pi)
     }
 
-    private fun probeSelected() {
+    private fun maybeAutoProbe(device: UsbDevice, reason: String) {
+        if (!usbManager.hasPermission(device)) return
+        if (AppleUsb.mode(device) == AppleUsb.Mode.APPLE_OTHER) {
+            log("Automatic probe skipped: unsupported Apple USB mode")
+            return
+        }
+        if (probeInFlight) {
+            log("Automatic probe skipped: probe already in progress")
+            return
+        }
+        if (lastAutoProbeDeviceName == device.deviceName) {
+            log("Automatic probe skipped: device already probed this connection")
+            return
+        }
+
+        lastAutoProbeDeviceName = device.deviceName
+        selected = device
+        log("Automatic probe starting ($reason)")
+        probeSelected(manual = false)
+    }
+
+    private fun probeSelected(manual: Boolean = false) {
         val device = selected ?: return
-        log("Probe requested: mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
+        if (!usbManager.hasPermission(device)) {
+            log("Probe skipped: USB permission is not available")
+            requestPermission(device)
+            return
+        }
+        if (probeInFlight) {
+            log("Probe skipped: another probe is already in progress")
+            return
+        }
+
+        probeInFlight = true
+        binding.probeButton.isEnabled = false
+        val source = if (manual) "manual" else "automatic"
+        log("Probe requested ($source): mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
         worker.execute {
             val connection = usbManager.openDevice(device)
             if (connection == null) {
                 logUi("openDevice failed")
+                finishProbe(device)
                 return@execute
             }
             logUi("openDevice succeeded")
@@ -166,8 +217,15 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 connection.close()
                 logUi("USB connection closed")
+                finishProbe(device)
             }
         }
+    }
+
+    private fun finishProbe(device: UsbDevice) = runOnUiThread {
+        probeInFlight = false
+        binding.probeButton.isEnabled = selected?.deviceName == device.deviceName && usbManager.hasPermission(device)
+        log("Probe finished")
     }
 
     private fun shareLogs() {
