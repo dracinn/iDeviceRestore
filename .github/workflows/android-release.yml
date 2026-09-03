@@ -102,9 +102,10 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.RELEASE_VERSION }}
+          target_commitish: ${{ github.sha }}
           files: iDeviceRestore.apk
           generate_release_notes: true
           name: iDeviceRestore Android ${{ env.RELEASE_VERSION }}
