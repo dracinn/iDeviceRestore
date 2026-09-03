@@ -10,7 +10,7 @@ object AppleUsb {
     const val APPLE_VID = 0x05AC
 
     private val dfuPids = setOf(0x1227)
-    private val recoveryPids = setOf(0x1280, 0x1281)
+    private val recoveryPids = setOf(0x1280, 0x1281, 0x1282, 0x1283)
     private val wtfPids = setOf(0x1222)
 
     enum class Mode { DFU, RECOVERY, WTF, APPLE_OTHER }
@@ -33,7 +33,11 @@ object AppleUsb {
     fun interfaceSummary(device: UsbDevice): String = buildString {
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
-            append("if#$i class=${intf.interfaceClass} subclass=${intf.interfaceSubclass} protocol=${intf.interfaceProtocol} endpoints=${intf.endpointCount}\n")
+            append(
+                "ifIndex=$i id=${intf.id} alt=${intf.alternateSetting} " +
+                    "class=${intf.interfaceClass} subclass=${intf.interfaceSubclass} " +
+                    "protocol=${intf.interfaceProtocol} endpoints=${intf.endpointCount}\n"
+            )
             for (e in 0 until intf.endpointCount) {
                 val ep = intf.getEndpoint(e)
                 val dir = if (ep.direction == UsbConstants.USB_DIR_IN) "IN" else "OUT"
@@ -81,17 +85,19 @@ object AppleUsb {
             }
 
             val score = when (deviceMode) {
-                Mode.RECOVERY, Mode.WTF -> {
+                Mode.RECOVERY -> {
                     var s = 0
-                    if (bulkIn != null) s += 100
-                    if (bulkOut != null) s += 50
-                    if (bulkIn != null && bulkOut != null) s += 100
-                    if (intf.interfaceClass == 255) s += 10
-                    if (intf.endpointCount >= 2) s += 5
+                    // libirecovery uses interface 0 / alt 0 for classic 0x1280/0x1281 recovery.
+                    if (intf.id == 0) s += 500
+                    if (intf.alternateSetting == 0) s += 100
+                    if (bulkIn != null) s += 20
+                    if (bulkOut != null) s += 10
                     s
                 }
-                Mode.DFU -> {
+                Mode.WTF, Mode.DFU -> {
                     var s = 0
+                    if (intf.id == 0) s += 200
+                    if (intf.alternateSetting == 0) s += 100
                     if (intf.interfaceClass == 254) s += 100
                     if (intf.interfaceSubclass == 1) s += 50
                     if (intf.endpointCount == 0) s += 10
