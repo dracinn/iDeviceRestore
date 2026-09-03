@@ -41,8 +41,6 @@ class BetaFirmwareCatalog(
         logger("BetaFirmwareCatalog: parsed ${rows.size} beta/RC candidate row(s)")
         if (rows.isEmpty()) error("No beta/RC firmware rows could be parsed for device")
 
-        // The signing mark on IPSW.dev is rendered as an icon/SVG and may disappear when HTML is
-        // flattened to text. Verify signing on the detail page instead of depending on that glyph.
         for (row in rows.take(MAX_DETAIL_PROBES)) {
             logger(
                 "BetaFirmwareCatalog: candidate ${row.version} (${row.buildId}) " +
@@ -92,9 +90,9 @@ class BetaFirmwareCatalog(
     }
 
     /**
-     * Convert the page to bounded plain text and parse version/build/date/size tuples.
-     * Signing is intentionally not parsed here because the current site renders that state as an
-     * icon rather than reliable textual content. The detail page is used as the signing authority.
+     * Flatten only markup, then locate each beta/RC version and scan a bounded window after it for
+     * the build, release date, and size. IPSW.dev inserts accessibility/signing labels between
+     * those visible columns, so requiring the fields to be adjacent is too brittle.
      */
     private fun parseRows(html: String): List<ParsedRow> {
         val text = html
@@ -104,34 +102,56 @@ class BetaFirmwareCatalog(
             .replace("&nbsp;", " ", ignoreCase = true)
             .replace("&amp;", "&", ignoreCase = true)
             .replace("&#44;", ",", ignoreCase = true)
+            .replace("&check;", " ✓ ", ignoreCase = true)
+            .replace("&#10003;", " ✓ ", ignoreCase = true)
+            .replace("&#x2713;", " ✓ ", ignoreCase = true)
             .replace(Regex("\\s+"), " ")
             .trim()
 
         logger("BetaFirmwareCatalog: normalized page to ${text.length} characters")
 
-        // Current page shape after markup removal resembles:
-        // 27.0 beta 8 26A5425a August 31, 2026 22.74 GB
-        // The signing SVG/icon may contribute no text at all, so allow a small non-alphanumeric
-        // separator region between build and date without requiring a checkmark character.
-        val regex = Regex(
-            "([0-9]+(?:\\.[0-9]+){1,3}\\s+(?:(?:beta)(?:\\s+[0-9]+)?(?:\\s+v\\.?\\s*[0-9]+)?|RC(?:\\s+[0-9]+)?))\\s+" +
-                "([A-Za-z0-9]+)\\s+[^A-Za-z0-9]{0,12}\\s*" +
-                "([A-Za-z]+\\s+[0-9]{1,2},\\s+[0-9]{4})\\s+" +
-                "((?:[0-9]+(?:\\.[0-9]+)?\\s*(?:GB|GiB|MB|MiB))|N/A)",
+        val versionRegex = Regex(
+            "[0-9]+(?:\\.[0-9]+){1,3}\\s+(?:(?:beta)(?:\\s+[0-9]+)?(?:\\s+v\\.?\\s*[0-9]+)?|RC(?:\\s+[0-9]+)?)",
             RegexOption.IGNORE_CASE
         )
+        val buildRegex = Regex("\\b[0-9]{2}[A-Za-z][A-Za-z0-9]{3,12}\\b")
+        val dateRegex = Regex("[A-Za-z]+\\s+[0-9]{1,2},\\s+[0-9]{4}")
+        val sizeRegex = Regex("(?:[0-9]+(?:\\.[0-9]+)?\\s*(?:GB|GiB|MB|MiB))|N/A", RegexOption.IGNORE_CASE)
 
-        return regex.findAll(text)
-            .map { match ->
-                ParsedRow(
-                    version = match.groupValues[1].trim().replace(Regex("\\s+"), " "),
-                    buildId = match.groupValues[2].trim(),
-                    releaseDateText = match.groupValues[3].trim(),
-                    fileSizeText = match.groupValues[4].trim()
+        val rows = buildList {
+            versionRegex.findAll(text).forEach { versionMatch ->
+                val windowStart = versionMatch.range.first
+                val windowEnd = minOf(text.length, versionMatch.range.last + 1 + ROW_WINDOW_CHARS)
+                val window = text.substring(windowStart, windowEnd)
+                val relativeVersionEnd = versionMatch.value.length
+
+                val build = buildRegex.find(window, relativeVersionEnd) ?: return@forEach
+                val date = dateRegex.find(window, build.range.last + 1) ?: return@forEach
+                val size = sizeRegex.find(window, date.range.last + 1) ?: return@forEach
+
+                add(
+                    ParsedRow(
+                        version = versionMatch.value.trim().replace(Regex("\\s+"), " "),
+                        buildId = build.value,
+                        releaseDateText = date.value,
+                        fileSizeText = size.value
+                    )
                 )
             }
-            .distinctBy { it.buildId }
-            .toList()
+        }.distinctBy { it.buildId }
+
+        if (rows.isEmpty()) {
+            val firstBeta = Regex("beta|RC", RegexOption.IGNORE_CASE).find(text)
+            if (firstBeta != null) {
+                val start = maxOf(0, firstBeta.range.first - 100)
+                val end = minOf(text.length, firstBeta.range.first + 500)
+                logger("BetaFirmwareCatalog: parse sample=${text.substring(start, end)}")
+            } else {
+                logger("BetaFirmwareCatalog: normalized page contains no beta/RC token")
+            }
+        }
+
+        return rows
     }
 
     private fun parseDate(value: String): Instant? = runCatching {
@@ -176,5 +196,6 @@ class BetaFirmwareCatalog(
 
     companion object {
         private const val MAX_DETAIL_PROBES = 8
+        private const val ROW_WINDOW_CHARS = 320
     }
 }
