@@ -88,10 +88,16 @@
             android:layout_height="wrap_content"
             android:text="" />
         <Button
-            android:id="@+id/downloadFirmwareButton"
+            android:id="@+id/selectFirmwareButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:enabled="false"
+            android:text="Select signed firmware" />
+        <Button
+            android:id="@+id/downloadFirmwareButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:enabled="false"
             android:text="Download firmware" />
         <Button
