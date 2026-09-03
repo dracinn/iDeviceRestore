@@ -94,25 +94,36 @@ class BetaFirmwareCatalog(
         }
 
         val exactSize = probeAppleContentLength(appleUrl)
-        val firmwareSize = if (exactSize > 0L) exactSize else candidate.fileSize
-        if (exactSize > 0L) {
-            logger("BetaFirmwareCatalog: Apple CDN exact payload size=$exactSize bytes")
-        } else {
-            logger("BetaFirmwareCatalog: Apple CDN size probe unavailable; using rounded index size=${candidate.fileSize} bytes")
+        if (exactSize <= 0L) {
+            logger("BetaFirmwareCatalog: Apple CDN payload verification failed for ${candidate.buildId}")
+            return null
         }
 
+        logger("BetaFirmwareCatalog: Apple CDN exact payload size=$exactSize bytes")
         logger("BetaFirmwareCatalog: selected ${candidate.buildId}; payload host=$APPLE_CDN_HOST")
         return FirmwareCatalog.Firmware(
             identifier = identifier,
             version = candidate.version,
             buildId = candidate.buildId,
             url = appleUrl,
-            fileSize = firmwareSize,
+            fileSize = exactSize,
             sha1 = null,
             releaseDate = candidate.releaseDate,
             uploadDate = null,
             signed = true
         )
+    }
+
+    /** Re-read current signing state before resolving a cached beta/RC build. */
+    fun reverifySigned(identifier: String, buildId: String): FirmwareCatalog.Firmware? {
+        logger("BetaFirmwareCatalog: reverify signed build $buildId for $identifier")
+        val fresh = signedCandidates(identifier)
+            .firstOrNull { it.buildId.equals(buildId, ignoreCase = true) }
+        if (fresh == null) {
+            logger("BetaFirmwareCatalog: reverify failed; $buildId is not currently reported signed")
+            return null
+        }
+        return resolveSigned(identifier, fresh)
     }
 
     fun latestSigned(identifier: String): FirmwareCatalog.Firmware? {
