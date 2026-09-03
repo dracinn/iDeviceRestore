@@ -13,10 +13,7 @@ import java.security.MessageDigest
 import java.util.Properties
 
 internal class FirmwareDownloadEngine(private val context: Context) {
-    data class Outcome(
-        val file: File,
-        val digestHex: String,
-    )
+    data class Outcome(val file: File, val digestHex: String)
 
     class TransferException(
         message: String,
@@ -34,24 +31,25 @@ internal class FirmwareDownloadEngine(private val context: Context) {
         val directory = firmwareDirectory()
         val finalFile = File(directory, request.fileName)
         val partialFile = File(directory, "${request.fileName}.part")
-        val partialMetadataFile = File(directory, "${request.fileName}.part.properties")
-        val completeMetadataFile = File(directory, "${request.fileName}.complete.properties")
+        val partialMetadata = File(directory, "${request.fileName}.part.properties")
+        val completeMetadata = File(directory, "${request.fileName}.complete.properties")
 
-        existingCompletedFile(
-            request = request,
-            finalFile = finalFile,
-            completeMetadataFile = completeMetadataFile,
-            isCancelled = isCancelled,
-        )?.let { return it }
+        if (finalFile.exists()) {
+            return validateCompletedFile(request, finalFile, completeMetadata, isCancelled)
+        }
 
-        val metadata = loadMetadata(partialMetadataFile)
+        val metadata = loadMetadata(partialMetadata)
+        val hasValidator = metadata.getProperty(KEY_ETAG) != null ||
+            metadata.getProperty(KEY_LAST_MODIFIED) != null
         val canResume = partialFile.isFile &&
             metadata.getProperty(KEY_URL) == request.url &&
-            (metadata.getProperty(KEY_ETAG) != null || metadata.getProperty(KEY_LAST_MODIFIED) != null)
+            hasValidator
 
         if (partialFile.exists() && !canResume) {
-            partialFile.delete()
-            partialMetadataFile.delete()
+            if (!partialFile.delete()) {
+                throw TransferException("Could not reset unverified partial firmware", retryable = false)
+            }
+            partialMetadata.delete()
             metadata.clear()
         }
 
@@ -67,19 +65,18 @@ internal class FirmwareDownloadEngine(private val context: Context) {
 
         var connection = openConnection(request, resumeOffset, metadata)
         try {
-            var code = connection.responseCode
-            if (!connection.url.protocol.equals("https", ignoreCase = true)) {
-                throw TransferException("Firmware server redirected to a non-HTTPS URL", retryable = false)
-            }
+            var code = responseCode(connection)
 
-            if (code == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE && resumeOffset > 0L) {
+            if (code == HTTP_RANGE_NOT_SATISFIABLE && resumeOffset > 0L) {
                 connection.disconnect()
-                partialFile.delete()
-                partialMetadataFile.delete()
+                if (!partialFile.delete()) {
+                    throw TransferException("Could not reset stale partial firmware", retryable = false)
+                }
+                partialMetadata.delete()
                 metadata.clear()
                 resumeOffset = 0L
                 connection = openConnection(request, 0L, metadata)
-                code = connection.responseCode
+                code = responseCode(connection)
             }
 
             if (code !in 200..299) {
@@ -91,12 +88,12 @@ internal class FirmwareDownloadEngine(private val context: Context) {
             if (append) {
                 val contentRange = connection.getHeaderField("Content-Range")
                 if (contentRange == null || !contentRange.startsWith("bytes $resumeOffset-")) {
-                    throw TransferException("Firmware server returned an invalid resume range", retryable = true)
+                    throw TransferException("Firmware server returned an invalid resume range")
                 }
             } else if (resumeOffset > 0L) {
                 resumeOffset = 0L
-                if (partialFile.exists() && !partialFile.delete()) {
-                    throw TransferException("Could not reset partial firmware file", retryable = false)
+                if (!partialFile.delete()) {
+                    throw TransferException("Could not restart partial firmware", retryable = false)
                 }
             }
 
@@ -106,7 +103,6 @@ internal class FirmwareDownloadEngine(private val context: Context) {
                 responseBytes >= 0L -> resumeOffset + responseBytes
                 else -> null
             }
-
             val remaining = totalBytes?.minus(resumeOffset)
             val usableSpace = directory.usableSpace
             if (remaining != null && usableSpace > 0L && remaining > usableSpace) {
@@ -118,50 +114,23 @@ internal class FirmwareDownloadEngine(private val context: Context) {
             connection.getHeaderField("Last-Modified")?.let {
                 metadata.setProperty(KEY_LAST_MODIFIED, it)
             }
-            saveMetadata(partialMetadataFile, metadata)
+            saveMetadata(partialMetadata, metadata)
 
-            FileOutputStream(partialFile, append).use { output ->
-                BufferedInputStream(connection.inputStream, BUFFER_SIZE).use { input ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var downloaded = resumeOffset
-                    var lastReportAt = System.nanoTime()
-                    while (true) {
-                        if (isCancelled()) throw CancelledException()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-
-                        val now = System.nanoTime()
-                        if (now - lastReportAt >= PROGRESS_INTERVAL_NANOS) {
-                            onProgress(
-                                FirmwareDownloadProgress(
-                                    requestId = request.id,
-                                    phase = FirmwareDownloadPhase.DOWNLOADING,
-                                    bytesDownloaded = downloaded,
-                                    totalBytes = totalBytes,
-                                )
-                            )
-                            lastReportAt = now
-                        }
-                    }
-                    output.fd.sync()
-                    onProgress(
-                        FirmwareDownloadProgress(
-                            requestId = request.id,
-                            phase = FirmwareDownloadPhase.DOWNLOADING,
-                            bytesDownloaded = downloaded,
-                            totalBytes = totalBytes,
-                        )
-                    )
-                }
-            }
+            transferBody(
+                request = request,
+                connection = connection,
+                partialFile = partialFile,
+                append = append,
+                startOffset = resumeOffset,
+                totalBytes = totalBytes,
+                isCancelled = isCancelled,
+                onProgress = onProgress,
+            )
 
             request.expectedBytes?.let { expected ->
                 if (partialFile.length() != expected) {
                     throw TransferException(
                         "Firmware size mismatch: expected $expected bytes, received ${partialFile.length()}",
-                        retryable = true,
                     )
                 }
             }
@@ -186,9 +155,9 @@ internal class FirmwareDownloadEngine(private val context: Context) {
             if (!partialFile.renameTo(finalFile)) {
                 throw TransferException("Could not finalize firmware file", retryable = false)
             }
-            partialMetadataFile.delete()
+            partialMetadata.delete()
             saveCompleteMetadata(
-                completeMetadataFile,
+                completeMetadata,
                 request.url,
                 finalFile.length(),
                 algorithm,
@@ -209,35 +178,98 @@ internal class FirmwareDownloadEngine(private val context: Context) {
         }
     }
 
-    private fun existingCompletedFile(
+    private fun transferBody(
         request: FirmwareDownloadRequest,
-        finalFile: File,
-        completeMetadataFile: File,
+        connection: HttpURLConnection,
+        partialFile: File,
+        append: Boolean,
+        startOffset: Long,
+        totalBytes: Long?,
         isCancelled: () -> Boolean,
-    ): Outcome? {
-        if (!finalFile.isFile) return null
+        onProgress: (FirmwareDownloadProgress) -> Unit,
+    ) {
+        FileOutputStream(partialFile, append).use { output ->
+            BufferedInputStream(connection.inputStream, BUFFER_SIZE).use { input ->
+                val buffer = ByteArray(BUFFER_SIZE)
+                var downloaded = startOffset
+                var lastReportAt = System.nanoTime()
+                while (true) {
+                    if (isCancelled()) throw CancelledException()
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    downloaded += read
+
+                    val now = System.nanoTime()
+                    if (now - lastReportAt >= PROGRESS_INTERVAL_NANOS) {
+                        onProgress(
+                            FirmwareDownloadProgress(
+                                requestId = request.id,
+                                phase = FirmwareDownloadPhase.DOWNLOADING,
+                                bytesDownloaded = downloaded,
+                                totalBytes = totalBytes,
+                            )
+                        )
+                        lastReportAt = now
+                    }
+                }
+                output.fd.sync()
+                onProgress(
+                    FirmwareDownloadProgress(
+                        requestId = request.id,
+                        phase = FirmwareDownloadPhase.DOWNLOADING,
+                        bytesDownloaded = downloaded,
+                        totalBytes = totalBytes,
+                    )
+                )
+            }
+        }
+    }
+
+    private fun validateCompletedFile(
+        request: FirmwareDownloadRequest,
+        file: File,
+        metadataFile: File,
+        isCancelled: () -> Boolean,
+    ): Outcome {
+        request.expectedBytes?.let { expected ->
+            if (file.length() != expected) {
+                throw TransferException("Existing firmware size does not match the request", retryable = false)
+            }
+        }
 
         request.expectedDigestAlgorithm?.let { algorithm ->
-            val expected = request.expectedDigestHex ?: return@let
-            val actual = digest(finalFile, algorithm, isCancelled)
-            if (actual.equals(expected, ignoreCase = true)) {
-                if (request.expectedBytes == null || finalFile.length() == request.expectedBytes) {
-                    return Outcome(finalFile, actual)
-                }
+            val expected = requireNotNull(request.expectedDigestHex)
+            val actual = digest(file, algorithm, isCancelled)
+            if (!actual.equals(expected, ignoreCase = true)) {
+                throw TransferException("Existing firmware digest does not match the request", retryable = false)
             }
-            throw TransferException("Existing firmware file does not match the requested digest", retryable = false)
+            return Outcome(file, actual)
         }
 
-        val metadata = loadMetadata(completeMetadataFile)
-        val algorithm = metadata.getProperty(KEY_DIGEST_ALGORITHM) ?: return null
-        val expectedDigest = metadata.getProperty(KEY_DIGEST_HEX) ?: return null
-        val expectedLength = metadata.getProperty(KEY_BYTES)?.toLongOrNull() ?: return null
-        if (metadata.getProperty(KEY_URL) != request.url || expectedLength != finalFile.length()) {
-            return null
+        val metadata = loadMetadata(metadataFile)
+        val algorithm = metadata.getProperty(KEY_DIGEST_ALGORITHM)
+            ?: throw TransferException("Existing firmware is not verified", retryable = false)
+        val expectedDigest = metadata.getProperty(KEY_DIGEST_HEX)
+            ?: throw TransferException("Existing firmware is not verified", retryable = false)
+        val expectedLength = metadata.getProperty(KEY_BYTES)?.toLongOrNull()
+            ?: throw TransferException("Existing firmware is not verified", retryable = false)
+        if (metadata.getProperty(KEY_URL) != request.url || expectedLength != file.length()) {
+            throw TransferException("Existing firmware does not match the request", retryable = false)
         }
-        val actual = digest(finalFile, algorithm, isCancelled)
-        if (!actual.equals(expectedDigest, ignoreCase = true)) return null
-        return Outcome(finalFile, actual)
+        val actual = digest(file, algorithm, isCancelled)
+        if (!actual.equals(expectedDigest, ignoreCase = true)) {
+            throw TransferException("Existing firmware verification failed", retryable = false)
+        }
+        return Outcome(file, actual)
+    }
+
+    private fun responseCode(connection: HttpURLConnection): Int {
+        val code = connection.responseCode
+        if (!connection.url.protocol.equals("https", ignoreCase = true)) {
+            throw TransferException("Firmware server redirected to a non-HTTPS URL", retryable = false)
+        }
+        return code
     }
 
     private fun openConnection(
@@ -249,7 +281,6 @@ internal class FirmwareDownloadEngine(private val context: Context) {
         if (!url.protocol.equals("https", ignoreCase = true)) {
             throw TransferException("Firmware downloads must use HTTPS", retryable = false)
         }
-
         return (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
@@ -277,9 +308,7 @@ internal class FirmwareDownloadEngine(private val context: Context) {
     }
 
     private fun loadMetadata(file: File): Properties = Properties().apply {
-        if (file.isFile) {
-            runCatching { file.inputStream().use { load(it) } }
-        }
+        if (file.isFile) runCatching { file.inputStream().use { load(it) } }
     }
 
     private fun saveMetadata(file: File, properties: Properties) {
@@ -293,13 +322,15 @@ internal class FirmwareDownloadEngine(private val context: Context) {
         algorithm: String,
         digestHex: String,
     ) {
-        val properties = Properties().apply {
-            setProperty(KEY_URL, url)
-            setProperty(KEY_BYTES, bytes.toString())
-            setProperty(KEY_DIGEST_ALGORITHM, algorithm)
-            setProperty(KEY_DIGEST_HEX, digestHex)
-        }
-        saveMetadata(file, properties)
+        saveMetadata(
+            file,
+            Properties().apply {
+                setProperty(KEY_URL, url)
+                setProperty(KEY_BYTES, bytes.toString())
+                setProperty(KEY_DIGEST_ALGORITHM, algorithm)
+                setProperty(KEY_DIGEST_HEX, digestHex)
+            },
+        )
     }
 
     private fun digest(file: File, algorithm: String, isCancelled: () -> Boolean): String {
@@ -308,7 +339,7 @@ internal class FirmwareDownloadEngine(private val context: Context) {
             algorithm.equals("SHA-256", true) -> "SHA-256"
             else -> throw TransferException("Unsupported digest algorithm $algorithm", retryable = false)
         }
-        val digest = MessageDigest.getInstance(canonical)
+        val messageDigest = MessageDigest.getInstance(canonical)
         FileInputStream(file).use { raw ->
             BufferedInputStream(raw, BUFFER_SIZE).use { input ->
                 val buffer = ByteArray(BUFFER_SIZE)
@@ -316,11 +347,11 @@ internal class FirmwareDownloadEngine(private val context: Context) {
                     if (isCancelled()) throw CancelledException()
                     val read = input.read(buffer)
                     if (read < 0) break
-                    digest.update(buffer, 0, read)
+                    messageDigest.update(buffer, 0, read)
                 }
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return messageDigest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {
@@ -330,6 +361,7 @@ internal class FirmwareDownloadEngine(private val context: Context) {
         private const val KEY_BYTES = "bytes"
         private const val KEY_DIGEST_ALGORITHM = "digestAlgorithm"
         private const val KEY_DIGEST_HEX = "digestHex"
+        private const val HTTP_RANGE_NOT_SATISFIABLE = 416
         private const val USER_AGENT = "iDeviceRestore-Android/0.1"
         private const val CONNECT_TIMEOUT_MS = 30_000
         private const val READ_TIMEOUT_MS = 60_000
