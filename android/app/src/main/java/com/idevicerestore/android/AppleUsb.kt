@@ -16,6 +16,20 @@ object AppleUsb {
 
     enum class Mode { DFU, RECOVERY, WTF, APPLE_OTHER }
 
+    data class BootIdentifiers(
+        val rawSerial: String,
+        val cpidHex: String?,
+        val cprvHex: String?,
+        val cpfmHex: String?,
+        val scepHex: String?,
+        val bdidHex: String?,
+        val ecidHex: String?,
+        val ibflHex: String?
+    ) {
+        val cpid: Int? get() = cpidHex?.toIntOrNull(16)
+        val bdid: Int? get() = bdidHex?.toIntOrNull(16)
+    }
+
     fun mode(device: UsbDevice): Mode = when (device.productId) {
         in dfuPids -> Mode.DFU
         in recoveryPids -> Mode.RECOVERY
@@ -31,21 +45,44 @@ object AppleUsb {
         runCatching { device.manufacturerName }.getOrNull()?.let { append(" manufacturer=$it") }
     }
 
-    fun bootIdentifierSummary(device: UsbDevice): String {
-        val serial = runCatching { device.serialNumber }.getOrNull()
-            ?: return "USB serial descriptor: unavailable"
-        if (serial.isBlank()) return "USB serial descriptor: empty"
-
-        val identifiers = bootIdRegex.findAll(serial)
+    fun bootIdentifiers(device: UsbDevice): BootIdentifiers? {
+        val serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        val values = bootIdRegex.findAll(serial)
             .associate { it.groupValues[1].uppercase() to it.groupValues[2].uppercase() }
+        return BootIdentifiers(
+            rawSerial = serial,
+            cpidHex = values["CPID"],
+            cprvHex = values["CPRV"],
+            cpfmHex = values["CPFM"],
+            scepHex = values["SCEP"],
+            bdidHex = values["BDID"],
+            ecidHex = values["ECID"],
+            ibflHex = values["IBFL"]
+        )
+    }
+
+    fun bootIdentifierSummary(device: UsbDevice): String {
+        val identifiers = bootIdentifiers(device)
+            ?: return if (runCatching { device.serialNumber }.getOrNull().isNullOrBlank()) {
+                "USB serial descriptor: unavailable"
+            } else {
+                "USB serial descriptor: empty"
+            }
 
         return buildString {
-            append("USB serial descriptor: ").append(serial)
-            if (identifiers.isNotEmpty()) {
+            append("USB serial descriptor: ").append(identifiers.rawSerial)
+            val entries = listOf(
+                "CPID" to identifiers.cpidHex,
+                "CPRV" to identifiers.cprvHex,
+                "CPFM" to identifiers.cpfmHex,
+                "SCEP" to identifiers.scepHex,
+                "BDID" to identifiers.bdidHex,
+                "ECID" to identifiers.ecidHex,
+                "IBFL" to identifiers.ibflHex
+            ).filter { it.second != null }
+            if (entries.isNotEmpty()) {
                 append("\nBoot identifiers:")
-                listOf("CPID", "CPRV", "CPFM", "SCEP", "BDID", "ECID", "IBFL").forEach { key ->
-                    identifiers[key]?.let { append(" $key=$it") }
-                }
+                entries.forEach { (key, value) -> append(" $key=$value") }
             }
         }
     }
