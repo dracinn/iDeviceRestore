@@ -141,11 +141,11 @@ class IpswPreflight(
     private fun parseXmlPlist(bytes: ByteArray): Any? {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
-            isXIncludeAware = false
+            setFeatureIfSupported("http://apache.org/xml/features/disallow-doctype-decl", false)
+            setFeatureIfSupported("http://xml.org/sax/features/external-general-entities", false)
+            setFeatureIfSupported("http://xml.org/sax/features/external-parameter-entities", false)
+            setFeatureIfSupported("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            runCatching { isXIncludeAware = false }
             isExpandEntityReferences = false
         }
         val builder = factory.newDocumentBuilder().apply {
@@ -155,6 +155,11 @@ class IpswPreflight(
         val plist = document.documentElement
         val child = elementChildren(plist).firstOrNull() ?: error("Empty plist")
         return parseElement(child)
+    }
+
+    private fun DocumentBuilderFactory.setFeatureIfSupported(name: String, value: Boolean) {
+        runCatching { setFeature(name, value) }
+            .onFailure { logger("IPSW preflight: XML feature unsupported on this Android runtime: $name") }
     }
 
     private fun parseElement(element: Element): Any? = when (element.tagName) {
