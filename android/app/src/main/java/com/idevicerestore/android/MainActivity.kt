@@ -330,6 +330,18 @@ class MainActivity : AppCompatActivity() {
                             }
                             .onFailure { logUi("DFU state/status probe failed: ${it.javaClass.simpleName}: ${it.message}") }
 
+                        logUi("DFU diagnostic: requesting read-only Apple nonce descriptor")
+                        runCatching { dfu.getNonceInfo() }
+                            .onSuccess { nonceInfo ->
+                                logUi(nonceInfo.summary())
+                                if (!nonceInfo.readyForApTss) {
+                                    logUi("DFU TSS readiness: blocked until ApNonce is available")
+                                }
+                            }
+                            .onFailure {
+                                logUi("DFU nonce descriptor unavailable: ${it.javaClass.simpleName}: ${it.message}")
+                            }
+
                         logUi("DFU diagnostic: requesting read-only functional descriptor")
                         runCatching { dfu.getFunctionalDescriptor(claimed.intf.id) }
                             .onSuccess { descriptor ->
