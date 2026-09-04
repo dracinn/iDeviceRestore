@@ -1,33 +1,303 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
-        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="No Apple USB device selected" android:textSize="18sp" android:textStyle="bold" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:background="#1A000000" android:orientation="vertical" android:padding="14dp">
-            <TextView android:id="@+id/operationTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Restore preparation" android:textSize="18sp" android:textStyle="bold" />
-            <TextView android:id="@+id/operationStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Waiting for device and firmware" android:textSize="16sp" />
-            <ProgressBar android:id="@+id/operationProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:indeterminate="true" android:max="100" android:visibility="gone" />
-        </LinearLayout>
-        <Button android:id="@+id/scanButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        <Button android:id="@+id/probeButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        <com.idevicerestore.android.DfuGuideButton android:id="@+id/dfuGuideButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="DFU guide — connect a device in Recovery" />
-        <TextView android:id="@+id/firmwareTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Firmware" android:textSize="17sp" android:textStyle="bold" />
-        <TextView android:id="@+id/firmwareStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Waiting for device identification" />
-        <ProgressBar android:id="@+id/firmwareProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:max="1000" android:progress="0" />
-        <TextView android:id="@+id/firmwareProgressText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" />
-        <Button android:id="@+id/selectFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Select signed firmware" />
-        <Button android:id="@+id/downloadFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Download firmware" />
-        <Button android:id="@+id/cancelDownloadButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Cancel download" />
-        <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        <com.idevicerestore.android.StartRestoreButton android:id="@+id/startRestoreButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" android:enabled="false" android:text="Start Restore" />
-        <Button android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Settings" />
-        <Button android:id="@+id/shareLogsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share verbose logs" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Activity Log" android:textSize="16sp" android:textStyle="bold" />
-        <TextView android:id="@+id/logView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:fontFamily="monospace" android:textIsSelectable="true" android:textSize="13sp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Probe Log" android:textSize="16sp" android:textStyle="bold" />
-        <TextView android:id="@+id/probeLogView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:fontFamily="monospace" android:textIsSelectable="true" android:textSize="13sp" />
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="28dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="iDeviceRestore"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Connect, verify firmware, and prepare the restore in clear stages."
+            android:textSize="14sp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Connected device"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="No Apple USB device selected"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <com.idevicerestore.android.DfuGuideButton
+                    android:id="@+id/dfuGuideButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="DFU guide — connect a device in Recovery" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/operationTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Restore preparation"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/operationStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Waiting for device and firmware"
+                    android:textSize="15sp" />
+
+                <ProgressBar
+                    android:id="@+id/operationProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:indeterminate="true"
+                    android:max="100"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/firmwareTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Firmware"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/firmwareStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Waiting for device identification"
+                    android:textSize="15sp" />
+
+                <ProgressBar
+                    android:id="@+id/firmwareProgress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:max="1000"
+                    android:progress="0" />
+
+                <TextView
+                    android:id="@+id/firmwareProgressText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text=""
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/selectFirmwareButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:enabled="false"
+                    android:text="Select signed firmware" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/downloadFirmwareButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:enabled="false"
+                    android:text="Download firmware" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/cancelDownloadButton"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:enabled="false"
+                    android:text="Cancel download" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Diagnostics"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Detailed USB, firmware, and restore information for testing and support."
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/shareLogsButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Share diagnostic report" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Activity log"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="#12000000"
+                    android:fontFamily="monospace"
+                    android:padding="10dp"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="USB probe log"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/probeLogView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="#12000000"
+                    android:fontFamily="monospace"
+                    android:padding="10dp"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settingsButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Settings" />
+
+        <!-- Legacy/next-stage controls remain present for existing view binding and staged restore work. -->
+        <Button
+            android:id="@+id/scanButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/probeButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <com.idevicerestore.android.TssTicketButton
+            android:id="@+id/requestTssTicketButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <com.idevicerestore.android.Image4PrepareButton
+            android:id="@+id/prepareIbssButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <com.idevicerestore.android.RestoreComponentPrepareButton
+            android:id="@+id/prepareRestoreComponentsButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <com.idevicerestore.android.StartRestoreButton
+            android:id="@+id/startRestoreButton"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:enabled="false"
+            android:text="Start Restore"
+            android:visibility="gone" />
     </LinearLayout>
 </ScrollView>
