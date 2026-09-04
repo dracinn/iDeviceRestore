@@ -9,7 +9,10 @@ object RestoreComponentPreparationStore {
         val manifestPath: String,
         val file: File,
         val bytes: Long,
-        val image4Validated: Boolean
+        val image4Validated: Boolean,
+        val personalizedFile: File? = null,
+        val personalizedBytes: Long? = null,
+        val personalizationState: String = "raw-only"
     )
 
     data class Snapshot(
