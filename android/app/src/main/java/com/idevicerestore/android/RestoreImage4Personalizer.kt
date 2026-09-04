@@ -28,9 +28,13 @@ object RestoreImage4Personalizer {
         require(raw.file.isFile) { "Extracted ${raw.name} not found: ${raw.file.absolutePath}" }
         require(ticket.apImg4Ticket.isNotEmpty()) { "ApImg4Ticket is empty" }
 
-        val componentTbm = ticket.componentTbmEntries[raw.name]
+        val componentTbm = ticket.componentTbm[raw.name]
         if (componentTbm != null) {
-            logger("Restore Image4: ${raw.name} requires component-specific TBM/IM4R; deferred (${componentTbm.size} bytes metadata)")
+            val metadataBytes = (componentTbm.ucon?.size ?: 0) + (componentTbm.ucer?.size ?: 0)
+            logger(
+                "Restore Image4: ${raw.name} requires component-specific TBM/IM4R; " +
+                    "deferred ($metadataBytes bytes metadata)"
+            )
             return Result(raw.name, null, "deferred-tbm-im4r", true)
         }
 
