@@ -1,6 +1,7 @@
 package com.idevicerestore.android
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import java.io.File
 import java.text.SimpleDateFormat
@@ -17,7 +18,9 @@ class BootDiagnosticLogger(context: Context) {
     private val lineTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     init {
-        val root = if (Environment.isExternalStorageManager()) {
+        val canUseProjectRoot = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            Environment.isExternalStorageManager()
+        val root = if (canUseProjectRoot) {
             File(Environment.getExternalStorageDirectory(), "iDeviceRestore/Diagnostics")
         } else {
             File(context.getExternalFilesDir(null), "Diagnostics")
