@@ -38,19 +38,24 @@ object DfuNonceInfo {
         fromDescriptorText(readStringDescriptorAscii(connection, NONCE_STRING_DESCRIPTOR_INDEX), reverseApNonce = false)
 
     /**
-     * Mode-aware nonce reader. Upstream idevicerestore reverses Port DFU AP nonce bytes before
-     * using them for TSS. Conventional DFU retains descriptor byte order.
+     * Personality-aware nonce reader. Upstream idevicerestore reverses Port DFU AP nonce bytes
+     * before using them for TSS. Conventional DFU retains descriptor byte order.
      */
     fun fromConnection(device: UsbDevice, connection: UsbDeviceConnection): Snapshot {
-        val mode = AppleUsb.mode(device)
+        val personality = AppleUsb.personality(device)
         val text = readStringDescriptorAscii(connection, NONCE_STRING_DESCRIPTOR_INDEX)
-        return when (mode) {
-            AppleUsb.Mode.PORT_DFU -> fromDescriptorText(text, reverseApNonce = true, source = "usb-string-descriptor-1-port-dfu-reversed")
-            AppleUsb.Mode.DFU, AppleUsb.Mode.WTF -> fromDescriptorText(text, reverseApNonce = false)
+        return when (personality) {
+            AppleUsb.Personality.PORT_DFU -> fromDescriptorText(
+                text,
+                reverseApNonce = true,
+                source = "usb-string-descriptor-1-port-dfu-reversed"
+            )
+            AppleUsb.Personality.DFU, AppleUsb.Personality.WTF ->
+                fromDescriptorText(text, reverseApNonce = false)
             else -> Snapshot(
                 apNonce = null,
                 sepNonce = null,
-                source = "nonce-not-applicable-${mode.name.lowercase()}",
+                source = "nonce-not-applicable-${personality.name.lowercase()}",
                 descriptorTextPresent = text.isNotBlank()
             )
         }
