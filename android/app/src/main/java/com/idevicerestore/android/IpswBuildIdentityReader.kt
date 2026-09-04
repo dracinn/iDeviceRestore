@@ -1,13 +1,9 @@
 package com.idevicerestore.android
 
-import org.xml.sax.Attributes
-import org.xml.sax.InputSource
-import org.xml.sax.helpers.DefaultHandler
+import android.util.Xml
 import java.io.File
-import java.io.StringReader
-import java.util.Base64
 import java.util.zip.ZipFile
-import javax.xml.parsers.SAXParserFactory
+import org.xmlpull.v1.XmlPullParser
 
 /**
  * Streams BuildManifest.plist and materializes only the selected BuildIdentity.
@@ -39,20 +35,47 @@ class IpswBuildIdentityReader(
                     error("Binary BuildManifest.plist is not supported yet")
                 }
 
-                logger("TSS identity: streaming BuildManifest identity index=$identityIndex")
+                logger("TSS identity: native Android XmlPullParser identity index=$identityIndex")
+                val parser = Xml.newPullParser().apply {
+                    setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+                    setInput(input, Charsets.UTF_8.name())
+                }
                 val handler = IdentityHandler(identityIndex)
-                val factory = SAXParserFactory.newInstance().apply {
-                    isNamespaceAware = false
-                    setFeatureIfSupported("http://xml.org/sax/features/external-general-entities", false)
-                    setFeatureIfSupported("http://xml.org/sax/features/external-parameter-entities", false)
-                    setFeatureIfSupported("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+                var event = parser.eventType
+                while (event != XmlPullParser.END_DOCUMENT) {
+                    when (event) {
+                        XmlPullParser.START_TAG -> when (parser.name) {
+                            "array" -> handler.startArray(parser.depth)
+                            "dict" -> handler.startDict(parser.depth)
+                            "key" -> {
+                                val depth = parser.depth
+                                handler.key(depth - 1, parser.nextText())
+                            }
+                            "string" -> if (handler.capturing()) {
+                                handler.addValue(PlistNode.StringValue(parser.nextText()))
+                            }
+                            "integer" -> if (handler.capturing()) {
+                                val raw = parser.nextText().trim()
+                                val value = if (raw.startsWith("0x", ignoreCase = true)) {
+                                    raw.substring(2).toLong(16)
+                                } else {
+                                    raw.toLong()
+                                }
+                                handler.addValue(PlistNode.IntegerValue(value))
+                            }
+                            "data" -> if (handler.capturing()) {
+                                handler.addValue(PlistNode.DataValue(PlistNode.decodeData(parser.nextText())))
+                            }
+                            "true" -> if (handler.capturing()) handler.addValue(PlistNode.BoolValue(true))
+                            "false" -> if (handler.capturing()) handler.addValue(PlistNode.BoolValue(false))
+                        }
+                        XmlPullParser.END_TAG -> when (parser.name) {
+                            "dict", "array" -> handler.endContainer(parser.name, parser.depth)
+                        }
+                    }
+                    event = parser.next()
                 }
-                val reader = factory.newSAXParser().xmlReader.apply {
-                    entityResolver = org.xml.sax.EntityResolver { _, _ -> InputSource(StringReader("")) }
-                    contentHandler = handler
-                    errorHandler = handler
-                }
-                reader.parse(InputSource(input))
+
                 val identity = handler.result()
                 logger(
                     "TSS identity: materialized index=$identityIndex " +
@@ -63,23 +86,14 @@ class IpswBuildIdentityReader(
         }
     }
 
-    private fun SAXParserFactory.setFeatureIfSupported(name: String, value: Boolean) {
-        runCatching { setFeature(name, value) }
-            .onFailure { logger("TSS identity: XML feature unsupported on this Android runtime: $name") }
-    }
-
     private class IdentityHandler(
         private val targetIndex: Int
-    ) : DefaultHandler() {
-        private var depth = 0
+    ) {
         private val pendingKeys = mutableMapOf<Int, String>()
-        private val text = StringBuilder()
-        private var collectingTag: String? = null
-
         private var buildIdentitiesArrayDepth: Int? = null
         private var currentIdentityIndex = -1
         private var captureRootDepth: Int? = null
-        private var result: PlistNode.Dict? = null
+        private var captured: PlistNode.Dict? = null
 
         private sealed class Container {
             class DictContainer(val node: PlistNode.Dict, var pendingKey: String? = null) : Container()
@@ -88,39 +102,40 @@ class IpswBuildIdentityReader(
 
         private val stack = ArrayDeque<Container>()
 
-        override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes?) {
-            depth++
-            val ownerDepth = depth - 1
-            when (qName) {
-                "array" -> {
-                    val openingKey = pendingKeys.remove(ownerDepth)
-                    if (openingKey == "BuildIdentities" && buildIdentitiesArrayDepth == null) {
-                        buildIdentitiesArrayDepth = depth
-                    }
-                    if (capturing()) startContainer(PlistNode.ArrayValue())
-                }
-                "dict" -> {
-                    val identitiesDepth = buildIdentitiesArrayDepth
-                    if (identitiesDepth != null && depth == identitiesDepth + 1 && captureRootDepth == null) {
-                        currentIdentityIndex++
-                        if (currentIdentityIndex == targetIndex) {
-                            captureRootDepth = depth
-                            val root = PlistNode.Dict()
-                            stack.addLast(Container.DictContainer(root))
-                            result = root
-                            return
-                        }
-                    }
-                    if (capturing()) startContainer(PlistNode.Dict())
-                }
-                "key", "string", "integer", "data" -> {
-                    collectingTag = qName
-                    text.setLength(0)
-                }
-                "true", "false" -> if (capturing()) {
-                    addValue(PlistNode.BoolValue(qName == "true"))
-                }
+        fun capturing(): Boolean = captureRootDepth != null
+
+        fun key(ownerDepth: Int, value: String) {
+            if (capturing()) {
+                (stack.lastOrNull() as? Container.DictContainer)?.pendingKey = value
+            } else {
+                pendingKeys[ownerDepth] = value.trim()
             }
+        }
+
+        fun startArray(depth: Int) {
+            if (!capturing()) {
+                val openingKey = pendingKeys.remove(depth - 1)
+                if (openingKey == "BuildIdentities" && buildIdentitiesArrayDepth == null) {
+                    buildIdentitiesArrayDepth = depth
+                }
+                return
+            }
+            startContainer(PlistNode.ArrayValue())
+        }
+
+        fun startDict(depth: Int) {
+            val identitiesDepth = buildIdentitiesArrayDepth
+            if (!capturing() && identitiesDepth != null && depth == identitiesDepth + 1) {
+                currentIdentityIndex++
+                if (currentIdentityIndex == targetIndex) {
+                    captureRootDepth = depth
+                    val root = PlistNode.Dict()
+                    stack.addLast(Container.DictContainer(root))
+                    captured = root
+                }
+                return
+            }
+            if (capturing()) startContainer(PlistNode.Dict())
         }
 
         private fun startContainer(node: PlistNode) {
@@ -128,65 +143,11 @@ class IpswBuildIdentityReader(
             when (node) {
                 is PlistNode.Dict -> stack.addLast(Container.DictContainer(node))
                 is PlistNode.ArrayValue -> stack.addLast(Container.ArrayContainer(node))
-                else -> error("Not a container")
+                else -> error("Not a plist container")
             }
         }
 
-        override fun characters(ch: CharArray, start: Int, length: Int) {
-            if (collectingTag != null) text.append(ch, start, length)
-        }
-
-        override fun endElement(uri: String?, localName: String?, qName: String) {
-            when (qName) {
-                "key" -> {
-                    if (capturing()) {
-                        val dict = stack.lastOrNull() as? Container.DictContainer
-                        dict?.pendingKey = text.toString().trim()
-                    } else {
-                        pendingKeys[depth - 1] = text.toString().trim()
-                    }
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "string" -> {
-                    if (capturing()) addValue(PlistNode.StringValue(text.toString()))
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "integer" -> {
-                    if (capturing()) {
-                        val raw = text.toString().trim()
-                        val value = when {
-                            raw.startsWith("0x", ignoreCase = true) -> raw.substring(2).toLong(16)
-                            else -> raw.toLong()
-                        }
-                        addValue(PlistNode.IntegerValue(value))
-                    }
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "data" -> {
-                    if (capturing()) addValue(PlistNode.DataValue(PlistNode.decodeData(text.toString())))
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "dict", "array" -> {
-                    if (capturing() && stack.size > 1) stack.removeLast()
-                    if (captureRootDepth == depth && qName == "dict") {
-                        stack.clear()
-                        captureRootDepth = null
-                    }
-                    if (buildIdentitiesArrayDepth == depth && qName == "array") {
-                        buildIdentitiesArrayDepth = null
-                    }
-                }
-            }
-            depth--
-        }
-
-        private fun capturing(): Boolean = captureRootDepth != null
-
-        private fun addValue(value: PlistNode) {
+        fun addValue(value: PlistNode) {
             when (val container = stack.lastOrNull()) {
                 is Container.DictContainer -> {
                     val key = container.pendingKey
@@ -199,7 +160,19 @@ class IpswBuildIdentityReader(
             }
         }
 
+        fun endContainer(tag: String, depth: Int) {
+            if (capturing() && stack.size > 1) stack.removeLast()
+            if (captureRootDepth == depth && tag == "dict") {
+                stack.clear()
+                captureRootDepth = null
+            }
+            if (buildIdentitiesArrayDepth == depth && tag == "array") {
+                buildIdentitiesArrayDepth = null
+            }
+            pendingKeys.remove(depth)
+        }
+
         fun result(): PlistNode.Dict =
-            result ?: error("BuildIdentity index $targetIndex was not found")
+            captured ?: error("BuildIdentity index $targetIndex was not found")
     }
 }

@@ -81,6 +81,12 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
 
     fun getNonceInfo(): DfuNonceInfo.Snapshot = DfuNonceInfo.fromConnection(connection)
 
+    /**
+     * Optional USB DFU functional descriptor probe. Some Apple DFU implementations, including the
+     * M1 hardware observed on Android, do not expose this descriptor through GET_DESCRIPTOR even
+     * though DFU_GETSTATE/GETSTATUS and nonce reads work normally. Failure here must not be treated
+     * as a DFU transport failure or a restore capability gate.
+     */
     fun getFunctionalDescriptor(interfaceId: Int): FunctionalDescriptor {
         require(interfaceId in 0..255) { "interfaceId must be between 0 and 255" }
         val data = ByteArray(9)
@@ -93,10 +99,15 @@ class DfuTransport(private val connection: UsbDeviceConnection) {
             data.size,
             USB_TIMEOUT_MS
         )
-        check(n >= 9) { "DFU functional descriptor returned $n bytes" }
-        check((data[0].toInt() and 0xff) >= 9) { "DFU functional descriptor length is ${data[0].toInt() and 0xff}" }
+        check(n >= 9) {
+            "optional DFU functional descriptor not exposed by device ($n bytes); " +
+                "DFU_GETSTATE/GETSTATUS remain authoritative"
+        }
+        check((data[0].toInt() and 0xff) >= 9) {
+            "optional DFU functional descriptor has invalid length ${data[0].toInt() and 0xff}"
+        }
         check((data[1].toInt() and 0xff) == DFU_FUNCTIONAL_DESCRIPTOR_TYPE) {
-            "Unexpected descriptor type 0x%02X".format(data[1].toInt() and 0xff)
+            "optional DFU functional descriptor returned unexpected type 0x%02X".format(data[1].toInt() and 0xff)
         }
         return FunctionalDescriptor(
             attributes = data[2].toInt() and 0xff,

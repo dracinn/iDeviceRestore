@@ -84,15 +84,14 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                     "IPSW size mismatch: expected=${firmware.fileSize} actual=${ipsw.length()}"
                 }
 
-                val preflight = IpswPreflight(logger = { log(activity, it) }).inspect(
-                    IpswPreflight.Request(
-                        ipsw = ipsw,
-                        identifier = device.identifier,
-                        boardConfig = device.boardConfig,
-                        chipId = device.cpid,
-                        boardId = device.bdid
-                    )
+                val preflightRequest = IpswPreflight.Request(
+                    ipsw = ipsw,
+                    identifier = device.identifier,
+                    boardConfig = device.boardConfig,
+                    chipId = device.cpid,
+                    boardId = device.bdid
                 )
+                val preflight = IpswPreflightCache.inspect(preflightRequest) { log(activity, it) }
                 require(preflight.productBuildVersion.equals(firmware.buildId, ignoreCase = true)) {
                     "BuildManifest build ${preflight.productBuildVersion} does not match selected build ${firmware.buildId}"
                 }
@@ -190,9 +189,9 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                     )
                 )
 
-                // Extraction-only is intentionally not terminal. When a matching TSS ticket arrives,
-                // the key changes and this coordinator automatically performs the personalization pass.
-                if (matchingTicket != null) completedKey = key
+                // Mark both extraction-only and personalized passes complete. When a matching TSS
+                // ticket arrives the key changes, so exactly one follow-up personalization pass runs.
+                completedKey = key
 
                 log(
                     activity,

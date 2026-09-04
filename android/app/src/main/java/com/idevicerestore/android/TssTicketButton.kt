@@ -94,22 +94,31 @@ class TssTicketButton @JvmOverloads constructor(
 
                 val buildId = selectedBuildId(activity)
                     ?: error("Selected firmware build could not be determined from the current UI")
+                val selectedChannel = selectedFirmwareChannel(activity)
                 val ids = AppleUsb.bootIdentifiers(device) ?: error("DFU boot identifiers are unavailable")
                 val cpid = ids.cpid ?: error("CPID unavailable")
                 val bdid = ids.bdid ?: error("BDID unavailable")
 
                 val catalog = FirmwareCatalog(logger = { log(activity, it) })
+                val betaCatalog = BetaFirmwareCatalog(logger = { log(activity, it) })
                 val catalogDevice = catalog.findDeviceByBootIds(cpid, bdid)
                     ?: error("No firmware catalog device matches the connected CPID/BDID")
-                log(activity, "TSS ticket request: device=${catalogDevice.identifier} build=$buildId")
+                log(
+                    activity,
+                    "TSS ticket request: device=${catalogDevice.identifier} build=$buildId " +
+                        "channel=${selectedChannel.name.lowercase()}"
+                )
                 log(activity, "TSS ticket request: freshly reverifying selected build before signing")
 
-                var firmware = catalog.reverifySigned(catalogDevice.identifier, buildId)
-                if (firmware == null) {
-                    firmware = BetaFirmwareCatalog(logger = { log(activity, it) })
-                        .reverifySigned(catalogDevice.identifier, buildId)
-                }
-                firmware ?: error("Selected build $buildId is not currently signed or its Apple payload could not be verified")
+                val firmware = when (selectedChannel) {
+                    FirmwareSelectionCandidate.Channel.STABLE ->
+                        catalog.reverifySigned(catalogDevice.identifier, buildId)
+                            ?: betaCatalog.reverifySigned(catalogDevice.identifier, buildId)
+                    FirmwareSelectionCandidate.Channel.BETA,
+                    FirmwareSelectionCandidate.Channel.RC ->
+                        betaCatalog.reverifySigned(catalogDevice.identifier, buildId)
+                            ?: catalog.reverifySigned(catalogDevice.identifier, buildId)
+                } ?: error("Selected build $buildId is not currently signed or its Apple payload could not be verified")
 
                 val storage = FirmwareStorage(activity, logger = { log(activity, it) })
                 val location = storage.locationFor(firmware)
@@ -120,15 +129,14 @@ class TssTicketButton @JvmOverloads constructor(
                 }
                 log(activity, "TSS ticket request: local IPSW verified size=${ipsw.length()} bytes")
 
-                val preflight = IpswPreflight(logger = { log(activity, it) }).inspect(
-                    IpswPreflight.Request(
-                        ipsw = ipsw,
-                        identifier = catalogDevice.identifier,
-                        boardConfig = catalogDevice.boardConfig,
-                        chipId = catalogDevice.cpid,
-                        boardId = catalogDevice.bdid
-                    )
+                val preflightRequest = IpswPreflight.Request(
+                    ipsw = ipsw,
+                    identifier = catalogDevice.identifier,
+                    boardConfig = catalogDevice.boardConfig,
+                    chipId = catalogDevice.cpid,
+                    boardId = catalogDevice.bdid
                 )
+                val preflight = IpswPreflightCache.inspect(preflightRequest) { log(activity, it) }
                 FirmwarePreparationStore.put(
                     FirmwarePreparationStore.Context(
                         device = catalogDevice,
@@ -212,6 +220,15 @@ class TssTicketButton @JvmOverloads constructor(
         val title = activity.findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
         return Regex("\\(([0-9]{2}[A-Za-z][A-Za-z0-9]{3,12})\\)\\s*$")
             .find(title)?.groupValues?.getOrNull(1)
+    }
+
+    private fun selectedFirmwareChannel(activity: AppCompatActivity): FirmwareSelectionCandidate.Channel {
+        val title = activity.findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
+        return when {
+            Regex("(?i)\\bbeta\\b").containsMatchIn(title) -> FirmwareSelectionCandidate.Channel.BETA
+            Regex("(?i)\\brc\\b").containsMatchIn(title) -> FirmwareSelectionCandidate.Channel.RC
+            else -> FirmwareSelectionCandidate.Channel.STABLE
+        }
     }
 
     private fun setOperation(activity: AppCompatActivity, message: String, busy: Boolean) {
