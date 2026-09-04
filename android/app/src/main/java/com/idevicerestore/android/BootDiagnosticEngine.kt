@@ -69,16 +69,16 @@ class BootDiagnosticEngine(
             return snapshot(BootDiagnosticState.USB_ERROR, device)
         }
 
-        connection.use { conn ->
-            val claimed = AppleUsb.claimBestInterface(device, conn)
+        try {
+            val claimed = AppleUsb.claimBestInterface(device, connection)
             if (claimed == null) {
                 record(BootDiagnosticState.RECOVERY_UNRESPONSIVE, "Could not claim a Recovery command interface")
                 return snapshot(BootDiagnosticState.RECOVERY_UNRESPONSIVE, device)
             }
 
             try {
-                val transport = RecoveryTransport(conn, claimed.bulkIn)
-                val recovery = RecoveryDiagnosticSession(device, conn, transport).snapshot()
+                val transport = RecoveryTransport(connection, claimed.bulkIn)
+                val recovery = RecoveryDiagnosticSession(device, connection, transport).snapshot()
                 lastRecoverySnapshot = recovery
                 recovery.variables.forEach { variable ->
                     val text = variable.result?.value ?: variable.error?.message ?: "no response"
@@ -105,8 +105,10 @@ class BootDiagnosticEngine(
                 record(BootDiagnosticState.RECOVERY_UNRESPONSIVE, "Recovery probe failed: ${t.message ?: t.javaClass.simpleName}")
                 return snapshot(BootDiagnosticState.RECOVERY_UNRESPONSIVE, device)
             } finally {
-                runCatching { conn.releaseInterface(claimed.intf) }
+                runCatching { connection.releaseInterface(claimed.intf) }
             }
+        } finally {
+            connection.close()
         }
     }
 
