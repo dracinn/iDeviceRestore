@@ -19,6 +19,8 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
     private val proofInFlight = AtomicBoolean(false)
+    private val watchdogInFlight = AtomicBoolean(false)
+    @Volatile private var lastLifetimeLogAtElapsedMs = 0L
     private val refresh = object : Runnable { override fun run() { refreshState(); if (isAttachedToWindow) postDelayed(this, REFRESH_MS) } }
 
     init { text = READY_LABEL; isEnabled = false; setOnClickListener { confirm() } }
@@ -38,6 +40,24 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         if (inFlight.get()) { isEnabled = false; text = "Sending iBEC…"; return }
 
         val recovery = recoveryDevice(usb)
+        val proofBeforePreparation = Stage1RecoveryProofStore.snapshot()
+        if (proofBeforePreparation.state == Stage1RecoveryProofStore.State.PROVEN) {
+            if (recovery == null) {
+                val elapsed = proofElapsedMs(proofBeforePreparation)
+                Stage1RecoveryProofStore.fail(proofBeforePreparation.deviceIdentityKey ?: "unknown", "Recovery USB device disappeared after Stage-1 proof")
+                log(activity, "Stage-1 lifetime LOST: elapsedMs=$elapsed reason=Recovery USB device disappeared")
+            } else {
+                val identityKey = deviceIdentityKey(recovery)
+                if (proofBeforePreparation.deviceIdentityKey != identityKey) {
+                    val elapsed = proofElapsedMs(proofBeforePreparation)
+                    Stage1RecoveryProofStore.fail(proofBeforePreparation.deviceIdentityKey ?: identityKey, "Recovery device identity changed after Stage-1 proof")
+                    log(activity, "Stage-1 lifetime LOST: elapsedMs=$elapsed reason=Recovery device identity changed VID=%04x PID=%04x mode=%s".format(recovery.vendorId, recovery.productId, AppleUsb.mode(recovery)))
+                } else if (SystemClock.elapsedRealtime() - proofBeforePreparation.lastVerifiedAtElapsedMs >= STAGE_1_WATCHDOG_MS) {
+                    verifyStage1Lifetime(activity, usb, recovery, identityKey)
+                }
+            }
+        }
+
         val ids = recovery?.let(AppleUsb::bootIdentifiers)
         val ticket = TssTicketStore.get()
         val prepared = RestoreComponentPreparationStore.get()
@@ -45,14 +65,14 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         val prerequisitesReady = recovery != null && ids?.cpidHex.equals(M1_CPID, true) && ticket != null && foundationMatchesDevice(ticket.foundation, recovery) && prepared != null && prepared.buildId.equals(ticket.buildId, true) && prepared.identityIndex == ticket.identityIndex && ibec?.personalizedFile?.isFile == true && ibec.personalizedBytes == ibec.personalizedFile.length()
         if (!prerequisitesReady) {
             isEnabled = false
-            text = READY_LABEL
+            text = if (Stage1RecoveryProofStore.snapshot().state == Stage1RecoveryProofStore.State.FAILED) "Stage-1 Recovery Lost" else READY_LABEL
             return
         }
 
         val identityKey = deviceIdentityKey(recovery!!)
         val proof = Stage1RecoveryProofStore.snapshot()
-        if (proof.deviceIdentityKey != identityKey) {
-            Stage1RecoveryProofStore.reset()
+        if (proof.deviceIdentityKey != null && proof.deviceIdentityKey != identityKey) {
+            Stage1RecoveryProofStore.fail(proof.deviceIdentityKey, "Recovery device identity changed before iBEC readiness")
         }
         val currentProof = Stage1RecoveryProofStore.snapshot()
         when (currentProof.state) {
@@ -71,7 +91,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
             }
             Stage1RecoveryProofStore.State.FAILED -> {
                 isEnabled = false
-                text = "Stage-1 Recovery Not Proven"
+                text = "Stage-1 Recovery Lost"
             }
         }
     }
@@ -99,6 +119,43 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 connection?.close()
                 proofInFlight.set(false)
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
+            }
+        }
+    }
+
+    private fun verifyStage1Lifetime(activity: AppCompatActivity, usb: UsbManager, device: UsbDevice, identityKey: String) {
+        if (!watchdogInFlight.compareAndSet(false, true)) return
+        worker.execute {
+            var connection: android.hardware.usb.UsbDeviceConnection? = null
+            try {
+                val before = Stage1RecoveryProofStore.snapshot()
+                if (before.state != Stage1RecoveryProofStore.State.PROVEN || before.deviceIdentityKey != identityKey) return@execute
+                if (AppleUsb.mode(device) != AppleUsb.Mode.RECOVERY || deviceIdentityKey(device) != identityKey) {
+                    Stage1RecoveryProofStore.fail(identityKey, "Recovery personality or identity changed after Stage-1 proof")
+                    log(activity, "Stage-1 lifetime LOST: elapsedMs=${proofElapsedMs(before)} reason=Recovery personality-or-identity changed VID=%04x PID=%04x mode=%s".format(device.vendorId, device.productId, AppleUsb.mode(device)))
+                    return@execute
+                }
+                connection = usb.openDevice(device) ?: error("openDevice failed")
+                val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("claim Recovery interface failed")
+                val transport = RecoveryTransport(connection, claimed.bulkIn)
+                val bootStage = transport.getenv("boot-stage").value.trim()
+                val buildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
+                if (bootStage != STAGE_1) {
+                    Stage1RecoveryProofStore.fail(identityKey, "Recovery boot-stage changed from 1 to $bootStage")
+                    log(activity, "Stage-1 lifetime LOST: elapsedMs=${proofElapsedMs(before)} boot-stage=$bootStage build-version=${buildVersion ?: "unknown"} VID=%04x PID=%04x".format(device.vendorId, device.productId))
+                    return@execute
+                }
+                Stage1RecoveryProofStore.refresh(identityKey, bootStage, buildVersion)
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastLifetimeLogAtElapsedMs >= STAGE_1_HEARTBEAT_LOG_MS) {
+                    lastLifetimeLogAtElapsedMs = now
+                    log(activity, "Stage-1 lifetime heartbeat: elapsedMs=${proofElapsedMs(Stage1RecoveryProofStore.snapshot())} boot-stage=1 build-version=${buildVersion ?: before.buildVersion ?: "unknown"}")
+                }
+            } catch (t: Throwable) {
+                log(activity, "Stage-1 lifetime sample unavailable: ${t.javaClass.simpleName}: ${t.message}; proof retained pending next read-only sample")
+            } finally {
+                connection?.close()
+                watchdogInFlight.set(false)
             }
         }
     }
@@ -147,10 +204,16 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 connection = usb.openDevice(device) ?: error("openDevice failed for iBEC transition test")
                 val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim Recovery interface")
                 val bulkOut = claimed.bulkOut ?: error("Recovery bulk OUT endpoint unavailable")
+                val transport = RecoveryTransport(connection, claimed.bulkIn)
+                val liveBootStage = transport.getenv("boot-stage").value.trim()
+                val liveBuildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
+                require(liveBootStage == STAGE_1) { "Live Recovery boot-stage=$liveBootStage immediately before iBEC upload; expected Stage-1" }
+                Stage1RecoveryProofStore.refresh(initialIdentityKey, liveBootStage, liveBuildVersion)
+                log(activity, "iBEC transition pre-upload gate: live boot-stage=$liveBootStage build-version=${liveBuildVersion ?: "unknown"} elapsedMs=${proofElapsedMs(Stage1RecoveryProofStore.snapshot())}")
                 val setInterface = connection.setInterface(claimed.intf)
                 log(activity, "iBEC transition USB: claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}; setInterface=$setInterface; bulkOut=0x%02x type=${bulkOut.type} maxPacket=${bulkOut.maxPacketSize}".format(bulkOut.address))
                 require(setInterface) { "Android could not activate claimed Recovery interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting}" }
-                val session = RecoveryComponentSession(device, RecoveryTransport(connection, claimed.bulkIn), connection, bulkOut)
+                val session = RecoveryComponentSession(device, transport, connection, bulkOut)
                 val uploaded = session.uploadFile(RecoveryComponentSession.Component.IBEC, file) { p -> setProgress(activity, p.percent) }
                 log(activity, "iBEC transition test: upload complete bytes=${uploaded.bytes} packets=${uploaded.packets} endpoint=0x%02x".format(uploaded.endpointAddress))
                 val execution = session.executeAppleSiliconIbec()
@@ -198,6 +261,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         }
     }
 
+    private fun proofElapsedMs(snapshot: Stage1RecoveryProofStore.Snapshot): Long = if (snapshot.provenAtElapsedMs > 0L) (SystemClock.elapsedRealtime() - snapshot.provenAtElapsedMs).coerceAtLeast(0L) else 0L
     private fun recoveryDevice(usb: UsbManager): UsbDevice? = usb.deviceList.values.firstOrNull { it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it) }
     private fun foundationMatchesDevice(f: TssRequestFoundation.Parameters, d: UsbDevice): Boolean { val ids = AppleUsb.bootIdentifiers(d) ?: return false; val ecid = ids.ecidHex?.toULongOrNull(16) ?: return false; val cpid = ids.cpidHex?.toLongOrNull(16) ?: return false; val bdid = ids.bdidHex?.toLongOrNull(16) ?: return false; return f.ecid == ecid && f.apChipId == cpid && f.apBoardId == bdid }
     private fun deviceIdentityKey(d: UsbDevice): String { val ids = AppleUsb.bootIdentifiers(d); return "${usbKey(d)}:${ids?.ecidHex ?: "?"}:${ids?.cpidHex ?: "?"}:${ids?.bdidHex ?: "?"}" }
@@ -206,5 +270,5 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
     private fun setOperation(a: AppCompatActivity, message: String, busy: Boolean) = a.runOnUiThread { a.findViewById<TextView?>(R.id.operationStatus)?.text = message; a.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply { visibility = if (busy) View.VISIBLE else View.GONE; if (busy) isIndeterminate = true } }
     private fun log(a: AppCompatActivity, message: String) = a.runOnUiThread { val delivered = runCatching { val m = a.javaClass.getDeclaredMethod("log", String::class.java); m.isAccessible = true; m.invoke(a, message); true }.getOrDefault(false); if (!delivered) a.findViewById<TextView?>(R.id.logView)?.append(message.trimEnd() + "\n") }
     private fun activity(): AppCompatActivity? { var c: Context? = context; while (c is ContextWrapper) { if (c is AppCompatActivity) return c; c = c.baseContext }; return c as? AppCompatActivity }
-    companion object { private const val REFRESH_MS = 1000L; private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L; private const val M1_CPID = "8103"; private const val STAGE_1 = "1"; private const val READY_LABEL = "Test M1 iBEC Recovery Transition" }
+    companion object { private const val REFRESH_MS = 1000L; private const val STAGE_1_WATCHDOG_MS = 5000L; private const val STAGE_1_HEARTBEAT_LOG_MS = 15000L; private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L; private const val M1_CPID = "8103"; private const val STAGE_1 = "1"; private const val READY_LABEL = "Test M1 iBEC Recovery Transition" }
 }
