@@ -69,8 +69,18 @@ class FirmwareDownloadService : Service() {
             return
         }
 
-        startAsForeground(version, buildId, 0, expectedSize)
-        broadcastState(STATE_RUNNING, total = expectedSize, message = "Starting Apple CDN download")
+        val resumedBytes = File(destination.absolutePath + ".part")
+            .takeIf { it.isFile }
+            ?.length()
+            ?.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
+            ?: 0L
+        startAsForeground(version, buildId, resumedBytes, expectedSize)
+        broadcastState(
+            STATE_RUNNING,
+            downloaded = resumedBytes,
+            total = expectedSize,
+            message = "Starting Apple CDN download"
+        )
 
         val downloader = FirmwareDownloader(logger = { message ->
             broadcastState(STATE_LOG, message = message)
@@ -111,7 +121,7 @@ class FirmwareDownloadService : Service() {
                 val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
                     .setContentTitle("iDeviceRestore firmware ready")
-                    .setContentText("$version ($buildId)")
+                    .setContentText("$version ($buildId) — 100%")
                     .setAutoCancel(true)
                     .build()
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
@@ -148,10 +158,14 @@ class FirmwareDownloadService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Downloading Apple firmware")
-            .setContentText("$version ($buildId) — ${formatBytes(downloaded)} / ${formatBytes(total)}")
+            .setContentText(
+                "$version ($buildId) — ${formatPercent(downloaded, total)} — " +
+                    "${formatBytes(downloaded)} / ${formatBytes(total)}"
+            )
+            .setSubText(formatPercent(downloaded, total))
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .setProgress(1000, if (total > 0) ((downloaded * 1000L) / total).toInt().coerceIn(0, 1000) else 0, total <= 0)
+            .setProgress(1000, progressPermille(downloaded, total), total <= 0)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Cancel",
@@ -240,5 +254,14 @@ class FirmwareDownloadService : Service() {
             val gib = value / (1024.0 * 1024.0 * 1024.0)
             return if (gib >= 1.0) "%.2f GiB".format(gib) else "%.1f MiB".format(value / (1024.0 * 1024.0))
         }
+
+        fun formatPercent(downloaded: Long, total: Long): String {
+            if (total <= 0L) return "—%"
+            val percent = (downloaded.coerceIn(0L, total) * 1000L) / total
+            return "%.1f%%".format(percent / 10.0)
+        }
+
+        private fun progressPermille(downloaded: Long, total: Long): Int =
+            if (total > 0L) ((downloaded.coerceIn(0L, total) * 1000L) / total).toInt() else 0
     }
 }
