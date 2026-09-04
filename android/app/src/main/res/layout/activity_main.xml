@@ -273,7 +273,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Experimental M1 transition test"
+                    android:text="Experimental M1 transition tests"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
@@ -281,7 +281,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="After firmware preparation is complete, this sends only personalized iBSS in classic DFU, observes USB re-enumeration, and stops before iBEC or Recovery uploads."
+                    android:text="Each state-changing step requires explicit confirmation. The iBSS test stops in Stage-1 Recovery; the iBEC test then stops again before restore-OS payloads."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.StartRestoreButton
@@ -291,51 +291,23 @@
                     android:layout_marginTop="10dp"
                     android:enabled="false"
                     android:text="Test M1 iBSS DFU Transition" />
+
+                <com.idevicerestore.android.IbecTransitionButton
+                    android:id="@+id/ibecTransitionButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Test M1 iBEC Recovery Transition" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Hidden session log sinks retained for MainActivity's existing logging pipeline. -->
-        <TextView
-            android:id="@+id/logView"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/probeLogView"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <!-- Legacy/next-stage controls remain present for existing view binding and staged restore work. -->
-        <Button
-            android:id="@+id/scanButton"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <Button
-            android:id="@+id/probeButton"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <com.idevicerestore.android.TssTicketButton
-            android:id="@+id/requestTssTicketButton"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <com.idevicerestore.android.Image4PrepareButton
-            android:id="@+id/prepareIbssButton"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
-
-        <com.idevicerestore.android.RestoreComponentPrepareButton
-            android:id="@+id/prepareRestoreComponentsButton"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:visibility="gone" />
+        <TextView android:id="@+id/logView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <TextView android:id="@+id/probeLogView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <Button android:id="@+id/scanButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <Button android:id="@+id/probeButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     </LinearLayout>
 </ScrollView>
