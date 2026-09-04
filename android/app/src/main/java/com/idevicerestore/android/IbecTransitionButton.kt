@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatButton(context, attrs) {
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
+    private val proofInFlight = AtomicBoolean(false)
     private val refresh = object : Runnable { override fun run() { refreshState(); if (isAttachedToWindow) postDelayed(this, REFRESH_MS) } }
 
     init { text = READY_LABEL; isEnabled = false; setOnClickListener { confirm() } }
@@ -35,14 +36,71 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
             IbecTransitionObservationStore.State.IDLE -> Unit
         }
         if (inFlight.get()) { isEnabled = false; text = "Sending iBEC…"; return }
+
         val recovery = recoveryDevice(usb)
         val ids = recovery?.let(AppleUsb::bootIdentifiers)
         val ticket = TssTicketStore.get()
         val prepared = RestoreComponentPreparationStore.get()
         val ibec = prepared?.components?.firstOrNull { it.name == "iBEC" }
-        val snapshot = RestoreSessionStore.transitions.snapshot()
-        val ready = recovery != null && ids?.cpidHex.equals(M1_CPID, true) && snapshot.state == RestoreUsbStateMachine.State.RECOVERY_CONNECTED && ticket != null && foundationMatchesDevice(ticket.foundation, recovery) && prepared != null && prepared.buildId.equals(ticket.buildId, true) && prepared.identityIndex == ticket.identityIndex && ibec?.personalizedFile?.isFile == true && ibec.personalizedBytes == ibec.personalizedFile.length()
-        text = READY_LABEL; isEnabled = ready
+        val prerequisitesReady = recovery != null && ids?.cpidHex.equals(M1_CPID, true) && ticket != null && foundationMatchesDevice(ticket.foundation, recovery) && prepared != null && prepared.buildId.equals(ticket.buildId, true) && prepared.identityIndex == ticket.identityIndex && ibec?.personalizedFile?.isFile == true && ibec.personalizedBytes == ibec.personalizedFile.length()
+        if (!prerequisitesReady) {
+            isEnabled = false
+            text = READY_LABEL
+            return
+        }
+
+        val identityKey = deviceIdentityKey(recovery!!)
+        val proof = Stage1RecoveryProofStore.snapshot()
+        if (proof.deviceIdentityKey != identityKey) {
+            Stage1RecoveryProofStore.reset()
+        }
+        val currentProof = Stage1RecoveryProofStore.snapshot()
+        when (currentProof.state) {
+            Stage1RecoveryProofStore.State.PROVEN -> {
+                isEnabled = currentProof.deviceIdentityKey == identityKey && currentProof.bootStage == STAGE_1
+                text = if (isEnabled) READY_LABEL else "Stage-1 Recovery Not Proven"
+            }
+            Stage1RecoveryProofStore.State.PROBING -> {
+                isEnabled = false
+                text = "Verifying Stage-1 Recovery…"
+            }
+            Stage1RecoveryProofStore.State.UNKNOWN -> {
+                isEnabled = false
+                text = "Verifying Stage-1 Recovery…"
+                verifyStage1Recovery(activity, usb, recovery, identityKey)
+            }
+            Stage1RecoveryProofStore.State.FAILED -> {
+                isEnabled = false
+                text = "Stage-1 Recovery Not Proven"
+            }
+        }
+    }
+
+    private fun verifyStage1Recovery(activity: AppCompatActivity, usb: UsbManager, device: UsbDevice, identityKey: String) {
+        if (!proofInFlight.compareAndSet(false, true)) return
+        Stage1RecoveryProofStore.begin(identityKey)
+        worker.execute {
+            var connection: android.hardware.usb.UsbDeviceConnection? = null
+            try {
+                require(AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY) { "Device is no longer in Recovery mode" }
+                require(deviceIdentityKey(device) == identityKey) { "Recovery device identity changed before Stage-1 verification" }
+                connection = usb.openDevice(device) ?: error("openDevice failed for Stage-1 Recovery verification")
+                val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim Recovery interface for Stage-1 verification")
+                val transport = RecoveryTransport(connection, claimed.bulkIn)
+                val bootStage = transport.getenv("boot-stage").value.trim()
+                val buildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
+                require(bootStage == STAGE_1) { "Recovery boot-stage=$bootStage; expected Stage-1" }
+                Stage1RecoveryProofStore.prove(identityKey, bootStage, buildVersion)
+                log(activity, "iBEC transition gate: Stage-1 Recovery proven read-only boot-stage=$bootStage build-version=${buildVersion ?: "unknown"}")
+            } catch (t: Throwable) {
+                Stage1RecoveryProofStore.fail(identityKey, t.message ?: t.javaClass.simpleName)
+                log(activity, "iBEC transition gate: Stage-1 Recovery proof failed: ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                connection?.close()
+                proofInFlight.set(false)
+                activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
+            }
+        }
     }
 
     private fun confirm() {
@@ -56,6 +114,14 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         if (!inFlight.compareAndSet(false, true)) return
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
         val initialDevice = recoveryDevice(usb) ?: run { inFlight.set(false); return }
+        val initialIdentityKey = deviceIdentityKey(initialDevice)
+        val stage1Proof = Stage1RecoveryProofStore.snapshot()
+        if (stage1Proof.state != Stage1RecoveryProofStore.State.PROVEN || stage1Proof.deviceIdentityKey != initialIdentityKey || stage1Proof.bootStage != STAGE_1) {
+            inFlight.set(false)
+            log(activity, "iBEC transition test blocked: Stage-1 Recovery proof is missing or stale")
+            refreshState()
+            return
+        }
         IbecTransitionObservationStore.begin(usbKey(initialDevice))
         isEnabled = false; text = "Sending iBEC…"
         log(activity, "iBEC transition test: explicit user confirmation received; boundary=iBEC-only")
@@ -65,6 +131,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
             try {
                 val device = recoveryDevice(usb) ?: error("No permitted Apple Recovery device is connected")
                 require(usbKey(device) == IbecTransitionObservationStore.snapshot().sourceUsbKey) { "Recovery device changed before iBEC upload" }
+                require(deviceIdentityKey(device) == initialIdentityKey) { "Recovery device identity changed before iBEC upload" }
                 val ids = AppleUsb.bootIdentifiers(device) ?: error("Recovery boot identifiers unavailable")
                 require(ids.cpidHex.equals(M1_CPID, true)) { "iBEC transition test is restricted to M1 CPID 0x$M1_CPID" }
                 val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable")
@@ -94,7 +161,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 setOperation(activity, "iBEC transition test failed: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
                 connection?.close(); if (connection != null) log(activity, "iBEC transition test: Recovery USB connection closed")
-                inFlight.set(false); activity.runOnUiThread { refreshState() }
+                inFlight.set(false); activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
             }
         }
     }
@@ -130,10 +197,11 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
 
     private fun recoveryDevice(usb: UsbManager): UsbDevice? = usb.deviceList.values.firstOrNull { it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it) }
     private fun foundationMatchesDevice(f: TssRequestFoundation.Parameters, d: UsbDevice): Boolean { val ids = AppleUsb.bootIdentifiers(d) ?: return false; val ecid = ids.ecidHex?.toULongOrNull(16) ?: return false; val cpid = ids.cpidHex?.toLongOrNull(16) ?: return false; val bdid = ids.bdidHex?.toLongOrNull(16) ?: return false; return f.ecid == ecid && f.apChipId == cpid && f.apBoardId == bdid }
+    private fun deviceIdentityKey(d: UsbDevice): String { val ids = AppleUsb.bootIdentifiers(d); return "${usbKey(d)}:${ids?.ecidHex ?: "?"}:${ids?.cpidHex ?: "?"}:${ids?.bdidHex ?: "?"}" }
     private fun usbKey(d: UsbDevice) = "${d.deviceName}:${d.productId}"
     private fun setProgress(a: AppCompatActivity, percent: Int) = a.runOnUiThread { a.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply { visibility = View.VISIBLE; isIndeterminate = false; progress = percent.coerceIn(0, 100) }; a.findViewById<TextView?>(R.id.operationStatus)?.text = "Sending personalized iBEC… ${percent.coerceIn(0, 100)}%" }
     private fun setOperation(a: AppCompatActivity, message: String, busy: Boolean) = a.runOnUiThread { a.findViewById<TextView?>(R.id.operationStatus)?.text = message; a.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply { visibility = if (busy) View.VISIBLE else View.GONE; if (busy) isIndeterminate = true } }
     private fun log(a: AppCompatActivity, message: String) = a.runOnUiThread { val delivered = runCatching { val m = a.javaClass.getDeclaredMethod("log", String::class.java); m.isAccessible = true; m.invoke(a, message); true }.getOrDefault(false); if (!delivered) a.findViewById<TextView?>(R.id.logView)?.append(message.trimEnd() + "\n") }
     private fun activity(): AppCompatActivity? { var c: Context? = context; while (c is ContextWrapper) { if (c is AppCompatActivity) return c; c = c.baseContext }; return c as? AppCompatActivity }
-    companion object { private const val REFRESH_MS = 1000L; private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L; private const val M1_CPID = "8103"; private const val READY_LABEL = "Test M1 iBEC Recovery Transition" }
+    companion object { private const val REFRESH_MS = 1000L; private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L; private const val M1_CPID = "8103"; private const val STAGE_1 = "1"; private const val READY_LABEL = "Test M1 iBEC Recovery Transition" }
 }
