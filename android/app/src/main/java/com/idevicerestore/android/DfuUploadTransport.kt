@@ -6,12 +6,7 @@ import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 
-/**
- * Apple DFU upload transport modeled after libirecovery's DFU branch of irecv_send_buffer().
- *
- * This is intentionally separate from RecoveryUploadTransport: Recovery uses bulk endpoint 0x04,
- * while DFU uses class/interface control transfers on endpoint zero.
- */
+/** Apple DFU upload transport modeled after libirecovery's DFU irecv_send_buffer path. */
 class DfuUploadTransport(
     private val connection: UsbDeviceConnection,
     private val interfaceId: Int
@@ -37,27 +32,9 @@ class DfuUploadTransport(
         require(interfaceId in 0..255) { "DFU interface id must be between 0 and 255" }
     }
 
-    fun sendBuffer(
-        data: ByteArray,
-        onProgress: ((Progress) -> Unit)? = null
-    ): Result = sendStream(ByteArrayInputStream(data), data.size.toLong(), onProgress)
+    fun sendBuffer(data: ByteArray, onProgress: ((Progress) -> Unit)? = null): Result =
+        sendStream(ByteArrayInputStream(data), data.size.toLong(), onProgress)
 
-    /**
-     * Sends exactly [length] payload bytes using libirecovery-compatible Apple DFU framing.
-     *
-     * Normal Apple DFU uses 0x800-byte DFU_DNLOAD blocks. A CRC-32 accumulator starts at
-     * 0xFFFFFFFF and is updated over every payload byte, then over Apple's 12-byte DFU suffix.
-     * The resulting accumulator is appended little-endian as four bytes. There is deliberately
-     * no final XOR, matching libirecovery.
-     *
-     * If the final payload chunk has fewer than 16 free bytes in the 0x800-byte packet,
-     * libirecovery sends that payload chunk first and then sends the 16-byte suffix/CRC using
-     * the same DFU block number. This implementation preserves that behavior exactly.
-     *
-     * The terminating zero-length DFU_DNLOAD is not sent here. Call [finishManifestation] only
-     * after a validated personalized component has been uploaded and the caller is prepared for
-     * the device to reset/re-enumerate.
-     */
     fun sendStream(
         input: InputStream,
         length: Long,
@@ -76,9 +53,7 @@ class DfuUploadTransport(
         for (block in 0 until packetCount) {
             val wanted = minOf(DFU_PACKET_SIZE.toLong(), length - sentPayload).toInt()
             readExactly(input, payload, wanted)
-            for (i in 0 until wanted) {
-                crc = crc32Step(crc, payload[i])
-            }
+            for (i in 0 until wanted) crc = crc32Step(crc, payload[i])
 
             val isLast = block == packetCount - 1
             if (!isLast) {
@@ -89,14 +64,11 @@ class DfuUploadTransport(
                 continue
             }
 
-            for (byte in APPLE_DFU_SUFFIX) {
-                crc = crc32Step(crc, byte)
-            }
+            for (byte in APPLE_DFU_SUFFIX) crc = crc32Step(crc, byte)
             val trailer = buildAppleTrailer(crc)
 
             val status = if (wanted + trailer.size > DFU_PACKET_SIZE) {
-                // libirecovery sends the full final payload block and then the 16-byte trailer
-                // using the same wValue/block number before polling GETSTATUS.
+                // libirecovery uses the same final block number for a separately transmitted trailer.
                 dnload(block, payload, wanted)
                 dnload(block, trailer, trailer.size)
                 waitForDownloadIdle()
@@ -116,14 +88,15 @@ class DfuUploadTransport(
     }
 
     /**
-     * Sends the zero-length DFU_DNLOAD request used by IRECV_SEND_OPT_DFU_NOTIFY_FINISH.
-     * For a [Result] returned from [sendStream], pass result.blocksSent as [block].
-     *
-     * This is state-changing and should only be called when the restore coordinator expects the
-     * uploaded personalized image to manifest and the USB device to reset/re-enumerate.
+     * Mirrors IRECV_SEND_OPT_DFU_NOTIFY_FINISH for non-Windows libirecovery:
+     * zero-length DFU_DNLOAD using the next block number, GETSTATUS twice, then host USB reset.
+     * This method is state-changing and may make the device immediately re-enumerate.
      */
     fun finishManifestation(block: Int): Int {
         require(block in 0..0xFFFF) { "DFU block number out of range" }
+        val capability = AndroidUsbReset.capability(connection)
+        check(capability.available) { capability.reason }
+
         val written = connection.controlTransfer(
             DFU_REQUEST_TYPE_OUT,
             DFU_DNLOAD,
@@ -134,31 +107,35 @@ class DfuUploadTransport(
             USB_TIMEOUT_MS
         )
         if (written < 0) throw IOException("DFU zero-length DNLOAD failed: $written")
-        return waitForManifestation().state
+
+        var last = DfuStatus(0, 0, readState())
+        repeat(2) {
+            last = getStatus()
+            if (last.status != 0) {
+                throw IOException(
+                    "DFU manifestation status error 0x%02X (%s) in state %s"
+                        .format(last.status, DfuTransport.statusName(last.status), DfuTransport.stateName(last.state))
+                )
+            }
+            if (last.pollTimeoutMs > 0) {
+                Thread.sleep(last.pollTimeoutMs.toLong().coerceAtMost(MAX_POLL_SLEEP_MS))
+            }
+        }
+
+        AndroidUsbReset.reset(connection)
+        return last.state
     }
 
     fun abort() {
         val result = connection.controlTransfer(
-            DFU_REQUEST_TYPE_OUT,
-            DFU_ABORT,
-            0,
-            interfaceId,
-            null,
-            0,
-            USB_TIMEOUT_MS
+            DFU_REQUEST_TYPE_OUT, DFU_ABORT, 0, interfaceId, null, 0, USB_TIMEOUT_MS
         )
         if (result < 0) throw IOException("DFU_ABORT failed: $result")
     }
 
     fun clearStatus() {
         val result = connection.controlTransfer(
-            DFU_REQUEST_TYPE_OUT,
-            DFU_CLRSTATUS,
-            0,
-            interfaceId,
-            null,
-            0,
-            USB_TIMEOUT_MS
+            DFU_REQUEST_TYPE_OUT, DFU_CLRSTATUS, 0, interfaceId, null, 0, USB_TIMEOUT_MS
         )
         if (result < 0) throw IOException("DFU_CLRSTATUS failed: $result")
     }
@@ -187,13 +164,7 @@ class DfuUploadTransport(
     private fun dnload(block: Int, data: ByteArray, length: Int) {
         require(block in 0..0xFFFF) { "DFU block number out of range" }
         val written = connection.controlTransfer(
-            DFU_REQUEST_TYPE_OUT,
-            DFU_DNLOAD,
-            block,
-            interfaceId,
-            data,
-            length,
-            USB_TIMEOUT_MS
+            DFU_REQUEST_TYPE_OUT, DFU_DNLOAD, block, interfaceId, data, length, USB_TIMEOUT_MS
         )
         if (written < 0) throw IOException("DFU_DNLOAD block $block failed: $written")
         if (written != length) {
@@ -210,7 +181,9 @@ class DfuUploadTransport(
                         .format(status.status, DfuTransport.statusName(status.status), DfuTransport.stateName(status.state))
                 )
             }
-            if (status.pollTimeoutMs > 0) Thread.sleep(status.pollTimeoutMs.toLong().coerceAtMost(MAX_POLL_SLEEP_MS))
+            if (status.pollTimeoutMs > 0) {
+                Thread.sleep(status.pollTimeoutMs.toLong().coerceAtMost(MAX_POLL_SLEEP_MS))
+            }
             when (status.state) {
                 DFU_DNLOAD_IDLE -> return status
                 DFU_DNLOAD_SYNC, DFU_DNLOAD_BUSY -> Unit
@@ -221,35 +194,12 @@ class DfuUploadTransport(
         throw IOException("Timed out waiting for dfuDNLOAD-IDLE")
     }
 
-    private fun waitForManifestation(): DfuStatus {
-        var last = getStatus()
-        repeat(MAX_STATUS_POLLS) {
-            last = getStatus()
-            if (last.status != 0) {
-                throw IOException("DFU manifestation failed with ${DfuTransport.statusName(last.status)}")
-            }
-            if (last.pollTimeoutMs > 0) Thread.sleep(last.pollTimeoutMs.toLong().coerceAtMost(MAX_POLL_SLEEP_MS))
-            when (last.state) {
-                DFU_MANIFEST_SYNC, DFU_MANIFEST, DFU_MANIFEST_WAIT_RESET -> return last
-                DFU_DNLOAD_SYNC, DFU_DNLOAD_BUSY, DFU_DNLOAD_IDLE -> Unit
-                else -> return last
-            }
-        }
-        return last
-    }
-
     private data class DfuStatus(val status: Int, val pollTimeoutMs: Int, val state: Int)
 
     private fun getStatus(): DfuStatus {
         val data = ByteArray(6)
         val n = connection.controlTransfer(
-            DFU_REQUEST_TYPE_IN,
-            DFU_GETSTATUS,
-            0,
-            interfaceId,
-            data,
-            data.size,
-            USB_TIMEOUT_MS
+            DFU_REQUEST_TYPE_IN, DFU_GETSTATUS, 0, interfaceId, data, data.size, USB_TIMEOUT_MS
         )
         if (n != 6) throw IOException("DFU_GETSTATUS returned $n bytes")
         val poll = (data[1].toInt() and 0xFF) or
@@ -261,13 +211,7 @@ class DfuUploadTransport(
     private fun readState(): Int {
         val data = ByteArray(1)
         val n = connection.controlTransfer(
-            DFU_REQUEST_TYPE_IN,
-            DFU_GETSTATE,
-            0,
-            interfaceId,
-            data,
-            data.size,
-            USB_TIMEOUT_MS
+            DFU_REQUEST_TYPE_IN, DFU_GETSTATE, 0, interfaceId, data, data.size, USB_TIMEOUT_MS
         )
         if (n != 1) throw IOException("DFU_GETSTATE returned $n bytes")
         return data[0].toInt() and 0xFF
@@ -293,7 +237,6 @@ class DfuUploadTransport(
         return trailer
     }
 
-    /** Bitwise equivalent of libirecovery's crc32_lookup_t1 step (polynomial 0xEDB88320). */
     private fun crc32Step(current: UInt, byte: Byte): UInt {
         var crc = current xor (byte.toUInt() and 0xFFu)
         repeat(8) {
@@ -325,9 +268,6 @@ class DfuUploadTransport(
         private const val DFU_DNLOAD_SYNC = 3
         private const val DFU_DNLOAD_BUSY = 4
         private const val DFU_DNLOAD_IDLE = 5
-        private const val DFU_MANIFEST_SYNC = 6
-        private const val DFU_MANIFEST = 7
-        private const val DFU_MANIFEST_WAIT_RESET = 8
         private const val DFU_ERROR = 10
 
         private const val USB_TIMEOUT_MS = 10_000
