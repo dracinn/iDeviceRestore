@@ -34,14 +34,26 @@ object DfuNonceInfo {
      * Mirrors libirecovery's nonce source: USB string descriptor index 1.
      * All transfers are standard device-to-host GET_DESCRIPTOR requests and are read-only.
      */
-    fun fromConnection(connection: UsbDeviceConnection): Snapshot {
+    fun fromConnection(connection: UsbDeviceConnection): Snapshot =
+        fromDescriptorText(readStringDescriptorAscii(connection, NONCE_STRING_DESCRIPTOR_INDEX), reverseApNonce = false)
+
+    /**
+     * Mode-aware nonce reader. Upstream idevicerestore reverses Port DFU AP nonce bytes before
+     * using them for TSS. Conventional DFU retains descriptor byte order.
+     */
+    fun fromConnection(device: UsbDevice, connection: UsbDeviceConnection): Snapshot {
+        val mode = AppleUsb.mode(device)
         val text = readStringDescriptorAscii(connection, NONCE_STRING_DESCRIPTOR_INDEX)
-        return Snapshot(
-            apNonce = parseTag(text, "NONC"),
-            sepNonce = parseTag(text, "SNON"),
-            source = "usb-string-descriptor-1",
-            descriptorTextPresent = text.isNotBlank()
-        )
+        return when (mode) {
+            AppleUsb.Mode.PORT_DFU -> fromDescriptorText(text, reverseApNonce = true, source = "usb-string-descriptor-1-port-dfu-reversed")
+            AppleUsb.Mode.DFU, AppleUsb.Mode.WTF -> fromDescriptorText(text, reverseApNonce = false)
+            else -> Snapshot(
+                apNonce = null,
+                sepNonce = null,
+                source = "nonce-not-applicable-${mode.name.lowercase()}",
+                descriptorTextPresent = text.isNotBlank()
+            )
+        }
     }
 
     /** Fallback for diagnostics when an open UsbDeviceConnection is not available. */
@@ -58,6 +70,20 @@ object DfuNonceInfo {
     )
 
     fun summary(device: UsbDevice): String = fromDevice(device).summary()
+
+    private fun fromDescriptorText(
+        text: String,
+        reverseApNonce: Boolean,
+        source: String = "usb-string-descriptor-1"
+    ): Snapshot {
+        val parsedAp = parseTag(text, "NONC")
+        return Snapshot(
+            apNonce = parsedAp?.let { if (reverseApNonce) it.reversedArray() else it },
+            sepNonce = parseTag(text, "SNON"),
+            source = source,
+            descriptorTextPresent = text.isNotBlank()
+        )
+    }
 
     private fun readStringDescriptorAscii(connection: UsbDeviceConnection, descriptorIndex: Int): String {
         require(descriptorIndex in 1..255) { "USB string descriptor index must be between 1 and 255" }
