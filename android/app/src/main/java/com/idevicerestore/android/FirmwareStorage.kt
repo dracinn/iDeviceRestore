@@ -183,7 +183,9 @@ class FirmwareStorage(
         }
 
     private fun ensureDirectory(directory: File) {
-        check(directory.isDirectory || directory.mkdirs()) {
+        if (directory.isDirectory) return
+        directory.mkdirs()
+        check(directory.isDirectory) {
             "Could not create ${directory.absolutePath}"
         }
     }
