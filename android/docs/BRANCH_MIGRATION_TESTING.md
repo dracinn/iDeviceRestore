@@ -4,11 +4,13 @@ This checklist tracks validation required before the legacy development branches
 
 ## Baseline
 
-- [ ] Android debug APK assembles from the cleaned `master` tree.
-- [ ] Existing Android CI workflow completes successfully.
-- [ ] No upstream non-Android workflows are removed or replaced by migration work.
+- [x] Android debug APK assembles from the cleaned `master` tree.
+- [x] Existing Android CI workflow completes successfully.
+- [x] No upstream non-Android workflows are removed or replaced by migration work.
 - [ ] App launches on the Android 14 test host.
 - [ ] Apple USB scan remains read-only until an explicit restore action is selected.
+
+Evidence: PR #3 Android CI run 35 completed successfully with `build-debug-apk`, and the post-merge Android Release run 141 completed successfully on `master` commit `16aacdd91135da405e009d15ff6b69183f79a5bc`.
 
 ## restore-communication
 
@@ -24,10 +26,10 @@ The legacy branch has no commits unique to the cleaned `master` tip.
 
 The legacy CI branch is superseded by the Android CI workflow already present on `master`.
 
-- [ ] Confirm `.github/workflows/android-ci.yml` builds the debug APK.
-- [ ] Confirm the debug APK artifact is uploaded.
-- [ ] Confirm legacy branch deletions of upstream `build.yml` and `curl.yml` are not migrated.
-- [ ] Confirm release workflow remains separate from normal pull-request CI.
+- [x] Confirm `.github/workflows/android-ci.yml` builds the debug APK.
+- [x] Confirm the debug APK artifact is uploaded.
+- [x] Confirm legacy branch deletions of upstream `build.yml` and `curl.yml` are not migrated.
+- [x] Confirm release workflow remains separate from normal pull-request CI.
 
 ## android-download-framework
 
@@ -35,23 +37,28 @@ The downloader framework documented by the legacy branch is already present in t
 
 ### Build and unit-level checks
 
-- [ ] Compare the legacy downloader branch with `master` and document any proven branch-only behavior or files that are still required.
-- [ ] Confirm the current downloader classes use the active `com.idevicerestore.android` package/layout and integrate with the existing application structure.
-- [ ] Reconcile only any proven missing dependencies or declarations; do not replace current Gradle or manifest files wholesale.
-- [ ] Assemble a debug APK with the existing downloader enabled.
-- [ ] Verify current download job/service declarations in `AndroidManifest.xml`.
-- [ ] Verify cancellation, retry, resume, and partial-file handling.
-- [ ] Verify filename/path sanitization and per-device firmware directory layout.
-- [ ] Verify existing firmware catalog and M3/M4/M5 support policy remain authoritative.
+- [x] Compare the legacy downloader branch with `master` and document any proven branch-only behavior or files that are still required.
+- [x] Confirm the current downloader classes use the active `com.idevicerestore.android` package/layout and integrate with the existing application structure.
+- [x] Reconcile only any proven missing dependencies or declarations; do not replace current Gradle or manifest files wholesale.
+- [x] Assemble a debug APK with the existing downloader enabled.
+- [x] Verify current download job/service declarations in `AndroidManifest.xml`.
+- [x] Verify cancellation, retry, resume, checksum-failure recovery, and partial-file handling by code inspection after PR #8.
+- [x] Verify filename/path sanitization and shared firmware-cache layout by code inspection.
+- [x] Verify existing firmware catalog and M3/M4/M5 support policy remain authoritative by code inspection.
+
+Evidence: the current implementation includes `FirmwareDownloader`, `FirmwareDownloadManager`, `FirmwareDownloadService`, `FirmwareStorage`, `FirmwareIntegrity`, and catalog integration in the active Android package. `AndroidManifest.xml` declares `.FirmwareDownloadService` as a non-exported `dataSync` foreground service and includes the required network/storage/foreground-service permissions. PR #6 moved physical IPSW payloads to the shared `/storage/emulated/0/iDeviceRestore/Firmware/IPSW/...` cache while retaining device-specific metadata/logs. PR #8 merged after Android CI run 47 passed; it hardens ranged resume, case-insensitive `Content-Range` validation, current-session speed accounting, and recovery from a full-size partial that fails SHA-1.
 
 ### Device/storage checks
 
 - [ ] Create the firmware root directory on first use.
-- [ ] Create a device-specific subdirectory for `MacBookAir10,1`.
-- [ ] Download a signed firmware file into the expected device directory.
+- [ ] Create a device-specific metadata/log workspace for `MacBookAir10,1`.
+- [ ] Download a signed firmware file into the shared IPSW cache.
 - [ ] Interrupt a download and confirm a subsequent run safely resumes or restarts according to policy.
+- [ ] Confirm a checksum-failed full-size partial is discarded so the next download can recover automatically.
 - [ ] Confirm insufficient-storage and network-failure paths are user-visible and do not corrupt completed downloads.
 - [ ] Confirm a completed firmware file can be selected by the existing restore-preparation pipeline.
+
+These checks require execution on the Android test host and must not be marked complete from repository inspection alone.
 
 ## Finalization gate
 
