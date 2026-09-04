@@ -10,11 +10,13 @@ object AppleUsb {
     const val APPLE_VID = 0x05AC
 
     private val dfuPids = setOf(0x1227)
+    private val portDfuPids = setOf(0xF014)
     private val recoveryPids = setOf(0x1280, 0x1281, 0x1282, 0x1283)
+    private val kisPids = setOf(0x1881)
     private val wtfPids = setOf(0x1222)
-    private val bootIdRegex = Regex("\\b(CPID|CPRV|CPFM|SCEP|BDID|ECID|IBFL):([0-9A-Fa-f]+)\\b")
+    private val bootIdRegex = Regex("\\b(CPID|CPRV|CPFM|SCEP|BDID|ECID|IBFL|PREV):([0-9A-Fa-f]+)\\b")
 
-    enum class Mode { DFU, RECOVERY, WTF, APPLE_OTHER }
+    enum class Mode { DFU, PORT_DFU, RECOVERY, KIS, WTF, APPLE_OTHER }
 
     data class BootIdentifiers(
         val rawSerial: String,
@@ -24,15 +26,21 @@ object AppleUsb {
         val scepHex: String?,
         val bdidHex: String?,
         val ecidHex: String?,
-        val ibflHex: String?
+        val ibflHex: String?,
+        val prevHex: String?
     ) {
         val cpid: Int? get() = cpidHex?.toIntOrNull(16)
         val bdid: Int? get() = bdidHex?.toIntOrNull(16)
+        val prev: Int? get() = prevHex?.toIntOrNull(16)
+        val image4Aware: Boolean?
+            get() = ibflHex?.toLongOrNull(16)?.let { flags -> flags and IBOOT_FLAG_IMAGE4_AWARE != 0L }
     }
 
     fun mode(device: UsbDevice): Mode = when (device.productId) {
         in dfuPids -> Mode.DFU
+        in portDfuPids -> Mode.PORT_DFU
         in recoveryPids -> Mode.RECOVERY
+        in kisPids -> Mode.KIS
         in wtfPids -> Mode.WTF
         else -> Mode.APPLE_OTHER
     }
@@ -57,7 +65,8 @@ object AppleUsb {
             scepHex = values["SCEP"],
             bdidHex = values["BDID"],
             ecidHex = values["ECID"],
-            ibflHex = values["IBFL"]
+            ibflHex = values["IBFL"],
+            prevHex = values["PREV"]
         )
     }
 
@@ -78,12 +87,14 @@ object AppleUsb {
                 "SCEP" to identifiers.scepHex,
                 "BDID" to identifiers.bdidHex,
                 "ECID" to identifiers.ecidHex,
-                "IBFL" to identifiers.ibflHex
+                "IBFL" to identifiers.ibflHex,
+                "PREV" to identifiers.prevHex
             ).filter { it.second != null }
             if (entries.isNotEmpty()) {
                 append("\nBoot identifiers:")
                 entries.forEach { (key, value) -> append(" $key=$value") }
             }
+            identifiers.image4Aware?.let { append("\nImage4-aware: $it") }
         }
     }
 
@@ -150,7 +161,7 @@ object AppleUsb {
                     if (bulkOut != null) s += 10
                     s
                 }
-                Mode.WTF, Mode.DFU -> {
+                Mode.WTF, Mode.DFU, Mode.PORT_DFU -> {
                     var s = 0
                     if (intf.id == 0) s += 200
                     if (intf.alternateSetting == 0) s += 100
@@ -159,8 +170,10 @@ object AppleUsb {
                     if (intf.endpointCount == 0) s += 10
                     s
                 }
-                Mode.APPLE_OTHER -> {
+                Mode.KIS, Mode.APPLE_OTHER -> {
                     var s = 0
+                    if (intf.id == 0) s += 100
+                    if (intf.alternateSetting == 0) s += 50
                     if (bulkIn != null) s += 20
                     if (bulkOut != null) s += 10
                     s
@@ -218,4 +231,6 @@ object AppleUsb {
         }
         return null
     }
+
+    private const val IBOOT_FLAG_IMAGE4_AWARE = 1L shl 2
 }
