@@ -31,14 +31,15 @@ The legacy CI branch is superseded by the Android CI workflow already present on
 
 ## android-download-framework
 
-This branch contains unique downloader code and must be reconciled with the current Android package/layout rather than rebased mechanically.
+The downloader framework documented by the legacy branch is already present in the cleaned `master` history. Do not port or overwrite that implementation mechanically. Validate the current implementation first, then migrate only branch-only deltas that are proven necessary after comparison with `master`.
 
 ### Build and unit-level checks
 
-- [ ] Port downloader classes into the current `com.idevicerestore.android` package structure or an approved subpackage.
-- [ ] Reconcile Gradle dependencies with the current Android application instead of replacing current build files wholesale.
-- [ ] Assemble a debug APK with the migrated downloader enabled.
-- [ ] Verify download job/service declarations in `AndroidManifest.xml`.
+- [ ] Compare the legacy downloader branch with `master` and document any proven branch-only behavior or files that are still required.
+- [ ] Confirm the current downloader classes use the active `com.idevicerestore.android` package/layout and integrate with the existing application structure.
+- [ ] Reconcile only any proven missing dependencies or declarations; do not replace current Gradle or manifest files wholesale.
+- [ ] Assemble a debug APK with the existing downloader enabled.
+- [ ] Verify current download job/service declarations in `AndroidManifest.xml`.
 - [ ] Verify cancellation, retry, resume, and partial-file handling.
 - [ ] Verify filename/path sanitization and per-device firmware directory layout.
 - [ ] Verify existing firmware catalog and M3/M4/M5 support policy remain authoritative.
