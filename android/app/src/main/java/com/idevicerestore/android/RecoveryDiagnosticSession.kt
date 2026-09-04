@@ -72,6 +72,9 @@ class RecoveryDiagnosticSession(
     }
 
     private fun buildReadiness(results: List<VariableResult>): Readiness {
+        // DEFAULT_VARIABLES intentionally repeats a few core probes. Associate keeps the last
+        // successful value, making the readiness result reflect transport health at the end of
+        // the diagnostic sequence rather than only the first exchange.
         val values = results.associate { it.name to it.result?.value?.takeIf(String::isNotBlank) }
         val coreNames = setOf("build-version", "build-style", "auto-boot", "boot-stage")
         val coreFailures = results.filter { it.name in coreNames && it.result == null }
@@ -103,23 +106,25 @@ class RecoveryDiagnosticSession(
 
     companion object {
         /**
-         * All entries are queried with `getenv <name>` only. Some iBoot versions legitimately
-         * return an empty value for optional variables; that is diagnostic data, not a failure.
+         * Hardware-proven read-only environment variables for the M1 Recovery/iBoot transport.
+         *
+         * The first five entries succeeded on MacBookAir10,1 in build 118. The final repeated
+         * core queries deliberately exercise the same control channel again after several
+         * exchanges so the diagnostic can detect a transport that degrades mid-session.
+         *
+         * Previously guessed names such as product-name/model/board-id/chip-id/security-domain
+         * are intentionally omitted because this iBoot returned a USB stall for them. A stall is
+         * not useful readiness evidence and risks obscuring otherwise healthy command transport.
          */
         val DEFAULT_VARIABLES = listOf(
             "build-version",
             "build-style",
             "auto-boot",
             "boot-stage",
-            "product-name",
-            "model",
-            "board-id",
-            "chip-id",
-            "security-domain",
-            "production-mode",
-            "security-mode",
-            "debug-uarts",
-            "display-timing"
+            "display-timing",
+            "build-version",
+            "auto-boot",
+            "boot-stage"
         )
     }
 }
