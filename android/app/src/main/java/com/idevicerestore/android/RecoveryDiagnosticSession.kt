@@ -6,9 +6,8 @@ import android.hardware.usb.UsbDeviceConnection
 /**
  * Read-only Recovery communication snapshot.
  *
- * Control requests use the already-claimed primary Recovery interface. The optional console
- * sample is collected from a secondary bulk-IN alternate interface and released immediately.
- * No environment mutation, reboot, image upload, or bulk-OUT operation is exposed here.
+ * Only iBoot getenv queries and optional bulk-IN console reads are exposed here.
+ * No setenv/saveenv, reboot, go/bootx, image upload, reset, or bulk-OUT image transfer is used.
  */
 class RecoveryDiagnosticSession(
     private val device: UsbDevice,
@@ -74,13 +73,14 @@ class RecoveryDiagnosticSession(
 
     private fun buildReadiness(results: List<VariableResult>): Readiness {
         val values = results.associate { it.name to it.result?.value?.takeIf(String::isNotBlank) }
-        val failures = results.filter { it.result == null }
+        val coreNames = setOf("build-version", "build-style", "auto-boot", "boot-stage")
+        val coreFailures = results.filter { it.name in coreNames && it.result == null }
         val reasons = buildList {
             if (AppleUsb.mode(device) != AppleUsb.Mode.RECOVERY) {
                 add("USB device is not classified as Recovery mode")
             }
-            if (failures.isNotEmpty()) {
-                add("${failures.size} iBoot environment query(s) failed")
+            if (coreFailures.isNotEmpty()) {
+                add("${coreFailures.size} core iBoot environment query(s) failed")
             }
             if (values["build-version"].isNullOrBlank()) {
                 add("iBoot build-version was not returned")
@@ -91,7 +91,7 @@ class RecoveryDiagnosticSession(
         }
 
         return Readiness(
-            commandTransportReady = failures.isEmpty() && !values["build-version"].isNullOrBlank(),
+            commandTransportReady = coreFailures.isEmpty() && !values["build-version"].isNullOrBlank(),
             recoveryMode = AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY,
             buildVersion = values["build-version"],
             buildStyle = values["build-style"],
@@ -102,6 +102,24 @@ class RecoveryDiagnosticSession(
     }
 
     companion object {
-        val DEFAULT_VARIABLES = listOf("build-version", "build-style", "auto-boot", "boot-stage")
+        /**
+         * All entries are queried with `getenv <name>` only. Some iBoot versions legitimately
+         * return an empty value for optional variables; that is diagnostic data, not a failure.
+         */
+        val DEFAULT_VARIABLES = listOf(
+            "build-version",
+            "build-style",
+            "auto-boot",
+            "boot-stage",
+            "product-name",
+            "model",
+            "board-id",
+            "chip-id",
+            "security-domain",
+            "production-mode",
+            "security-mode",
+            "debug-uarts",
+            "display-timing"
+        )
     }
 }
