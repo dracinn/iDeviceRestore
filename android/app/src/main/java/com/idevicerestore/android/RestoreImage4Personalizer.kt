@@ -1,12 +1,18 @@
 package com.idevicerestore.android
 
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 
 /**
  * Local-only Image4 personalization for restore components whose upstream rules are currently
  * understood. This helper performs no USB I/O and refuses components that require IM4R/TBM data.
+ * Large IM4P payloads are streamed to disk so personalization does not depend on Android heap size.
  */
 object RestoreImage4Personalizer {
     data class Result(
@@ -51,143 +57,212 @@ object RestoreImage4Personalizer {
         }
 
         Image4StructureValidator.validateRawIm4p(raw.file, raw.name)
-        val source = raw.file.readBytes()
-        val im4p = rewriteIm4pTagIfNeeded(source, targetTag)
-        val img4 = stitchSimpleImg4(im4p, ticket.apImg4Ticket)
-        validateSimpleImg4(img4, ticket.apImg4Ticket)
+        val componentTagOffset = if (targetTag == null) null else findComponentTagOffset(raw.file, raw.name)
 
         val destination = File(destinationDirectory, "identity-${ticket.identityIndex}-${raw.name}.personalized.img4")
         val temporary = File(destination.parentFile, destination.name + ".part")
-        temporary.writeBytes(img4)
-        if (destination.exists() && !destination.delete()) {
-            temporary.delete()
-            throw IOException("Could not replace ${destination.absolutePath}")
+        if (temporary.exists() && !temporary.delete()) {
+            throw IOException("Could not remove stale temporary file ${temporary.absolutePath}")
         }
-        if (!temporary.renameTo(destination)) {
+
+        try {
+            stitchSimpleImg4Streaming(
+                rawFile = raw.file,
+                replacementTag = targetTag,
+                replacementOffset = componentTagOffset,
+                ticket = ticket.apImg4Ticket,
+                destination = temporary
+            )
+            validateSimpleImg4File(temporary, ticket.apImg4Ticket)
+
+            if (destination.exists() && !destination.delete()) {
+                throw IOException("Could not replace ${destination.absolutePath}")
+            }
+            if (!temporary.renameTo(destination)) {
+                throw IOException("Could not finalize personalized ${raw.name}")
+            }
+        } catch (t: Throwable) {
             temporary.delete()
-            throw IOException("Could not finalize personalized ${raw.name}")
+            throw t
         }
 
         logger(
-            "Restore Image4: ${raw.name} personalized raw=${source.size} bytes ticket=${ticket.apImg4Ticket.size} bytes " +
-                "output=${destination.length()} bytes tag=${targetTag ?: "unchanged"}"
+            "Restore Image4: ${raw.name} personalized raw=${raw.file.length()} bytes " +
+                "ticket=${ticket.apImg4Ticket.size} bytes output=${destination.length()} bytes " +
+                "tag=${targetTag ?: "unchanged"} io=streaming"
         )
         return Result(raw.name, destination, "personalized", false)
     }
 
-    private fun rewriteIm4pTagIfNeeded(data: ByteArray, replacement: String?): ByteArray {
-        if (replacement == null) return data.copyOf()
-        require(replacement.length == 4) { "IM4P replacement tag must be four characters" }
+    private fun findComponentTagOffset(file: File, componentName: String): Long {
+        RandomAccessFile(file, "r").use { input ->
+            val root = readElementHeader(input, componentName)
+            require(root.tag == TAG_SEQUENCE) { "$componentName IM4P root is not a sequence" }
+            require(root.endOffset == file.length()) { "$componentName IM4P root length does not match file size" }
 
-        val root = DerReader(data).readRoot()
-        require(root.tag == TAG_SEQUENCE) { "IM4P root is not a sequence" }
-        val children = DerReader(data, root.valueOffset, root.endOffset).readAll()
-        require(children.size >= 2) { "IM4P structure is incomplete" }
-        require(children[0].tag == TAG_IA5_STRING) { "IM4P magic is not an IA5 string" }
-        require(data.copyOfRange(children[0].valueOffset, children[0].endOffset).contentEquals(IM4P_MAGIC)) {
-            "Component magic is not IM4P"
-        }
-        val componentTag = children[1]
-        require(componentTag.tag == TAG_IA5_STRING) { "IM4P component tag is not an IA5 string" }
-        require(componentTag.endOffset - componentTag.valueOffset == 4) { "IM4P component tag is not four bytes" }
-        return data.copyOf().also { out ->
-            replacement.toByteArray(Charsets.US_ASCII).copyInto(out, componentTag.valueOffset)
+            input.seek(root.valueOffset)
+            val magic = readElementHeader(input, componentName)
+            require(magic.tag == TAG_IA5_STRING && magic.length == 4L) { "$componentName IM4P magic is invalid" }
+            val magicBytes = ByteArray(4)
+            input.readFully(magicBytes)
+            require(magicBytes.contentEquals(IM4P_MAGIC)) { "$componentName component magic is not IM4P" }
+
+            input.seek(magic.endOffset)
+            val tag = readElementHeader(input, componentName)
+            require(tag.tag == TAG_IA5_STRING && tag.length == 4L) { "$componentName IM4P component tag is invalid" }
+            return tag.valueOffset
         }
     }
 
-    private fun stitchSimpleImg4(im4p: ByteArray, ticket: ByteArray): ByteArray {
-        val magic = derElement(TAG_IA5_STRING, IMG4_MAGIC)
-        val ticketElement = derElement(TAG_CONTEXT_0_CONSTRUCTED, ticket)
-        val body = ByteArrayOutputStream(magic.size + im4p.size + ticketElement.size).apply {
-            write(magic)
-            write(im4p)
-            write(ticketElement)
-        }.toByteArray()
-        return derElement(TAG_SEQUENCE, body)
+    private fun stitchSimpleImg4Streaming(
+        rawFile: File,
+        replacementTag: String?,
+        replacementOffset: Long?,
+        ticket: ByteArray,
+        destination: File
+    ) {
+        if (replacementTag != null) {
+            require(replacementTag.length == 4) { "IM4P replacement tag must be four characters" }
+            require(replacementOffset != null && replacementOffset >= 0L) { "Missing IM4P replacement offset" }
+            require(replacementOffset + 4L <= rawFile.length()) { "IM4P replacement offset exceeds source file" }
+        }
+
+        val magicElement = derElement(TAG_IA5_STRING, IMG4_MAGIC)
+        val ticketHeader = derHeader(TAG_CONTEXT_0_CONSTRUCTED, ticket.size.toLong())
+        val bodyLength = magicElement.size.toLong() + rawFile.length() + ticketHeader.size.toLong() + ticket.size.toLong()
+        val rootHeader = derHeader(TAG_SEQUENCE, bodyLength)
+
+        BufferedOutputStream(FileOutputStream(destination), BUFFER_SIZE).use { output ->
+            output.write(rootHeader)
+            output.write(magicElement)
+
+            BufferedInputStream(FileInputStream(rawFile), BUFFER_SIZE).use { input ->
+                if (replacementTag == null) {
+                    input.copyTo(output, BUFFER_SIZE)
+                } else {
+                    val offset = replacementOffset!!
+                    copyExactly(input, output, offset)
+                    output.write(replacementTag.toByteArray(Charsets.US_ASCII))
+                    discardExactly(input, 4L)
+                    input.copyTo(output, BUFFER_SIZE)
+                }
+            }
+
+            output.write(ticketHeader)
+            output.write(ticket)
+            output.flush()
+        }
     }
 
-    private fun validateSimpleImg4(data: ByteArray, expectedTicket: ByteArray) {
-        val root = DerReader(data).readRoot()
-        require(root.tag == TAG_SEQUENCE && root.endOffset == data.size) { "IMG4 root is invalid" }
-        val children = DerReader(data, root.valueOffset, root.endOffset).readAll()
-        require(children.size == 3) { "IMG4 must contain magic, IM4P, and ticket" }
-        require(children[0].tag == TAG_IA5_STRING) { "IMG4 magic is missing" }
-        require(data.copyOfRange(children[0].valueOffset, children[0].endOffset).contentEquals(IMG4_MAGIC)) {
-            "IMG4 magic does not match"
+    private fun validateSimpleImg4File(file: File, expectedTicket: ByteArray) {
+        require(file.isFile && file.length() > 0L) { "Personalized IMG4 file is missing or empty" }
+        RandomAccessFile(file, "r").use { input ->
+            val root = readElementHeader(input, "personalized IMG4")
+            require(root.tag == TAG_SEQUENCE && root.endOffset == file.length()) { "IMG4 root is invalid" }
+
+            input.seek(root.valueOffset)
+            val magic = readElementHeader(input, "personalized IMG4")
+            require(magic.tag == TAG_IA5_STRING && magic.length == 4L) { "IMG4 magic is missing" }
+            val magicBytes = ByteArray(4)
+            input.readFully(magicBytes)
+            require(magicBytes.contentEquals(IMG4_MAGIC)) { "IMG4 magic does not match" }
+
+            input.seek(magic.endOffset)
+            val im4p = readElementHeader(input, "personalized IMG4")
+            require(im4p.tag == TAG_SEQUENCE) { "IMG4 second element is not IM4P" }
+
+            input.seek(im4p.endOffset)
+            val ticket = readElementHeader(input, "personalized IMG4")
+            require(ticket.tag == TAG_CONTEXT_0_CONSTRUCTED) { "IMG4 ticket element is missing" }
+            require(ticket.length == expectedTicket.size.toLong()) { "IMG4 ticket length does not match TSS response" }
+            val ticketBytes = ByteArray(expectedTicket.size)
+            input.readFully(ticketBytes)
+            require(ticketBytes.contentEquals(expectedTicket)) { "IMG4 ticket bytes do not match TSS response" }
+            require(ticket.endOffset == root.endOffset) { "IMG4 contains unexpected trailing elements" }
         }
-        require(children[1].tag == TAG_SEQUENCE) { "IMG4 second element is not IM4P" }
-        require(children[2].tag == TAG_CONTEXT_0_CONSTRUCTED) { "IMG4 ticket element is missing" }
-        require(data.copyOfRange(children[2].valueOffset, children[2].endOffset).contentEquals(expectedTicket)) {
-            "IMG4 ticket bytes do not match TSS response"
+    }
+
+    private fun copyExactly(input: BufferedInputStream, output: BufferedOutputStream, count: Long) {
+        var remaining = count
+        val buffer = ByteArray(BUFFER_SIZE)
+        while (remaining > 0L) {
+            val wanted = minOf(buffer.size.toLong(), remaining).toInt()
+            val read = input.read(buffer, 0, wanted)
+            if (read < 0) throw IOException("Unexpected EOF while streaming IM4P payload")
+            output.write(buffer, 0, read)
+            remaining -= read.toLong()
+        }
+    }
+
+    private fun discardExactly(input: BufferedInputStream, count: Long) {
+        var remaining = count
+        val buffer = ByteArray(16)
+        while (remaining > 0L) {
+            val wanted = minOf(buffer.size.toLong(), remaining).toInt()
+            val read = input.read(buffer, 0, wanted)
+            if (read < 0) throw IOException("Unexpected EOF while replacing IM4P component tag")
+            remaining -= read.toLong()
         }
     }
 
     private fun derElement(tag: Int, value: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream(value.size + 8)
-        out.write(derHeader(tag, value.size))
-        out.write(value)
-        return out.toByteArray()
+        val header = derHeader(tag, value.size.toLong())
+        return ByteArrayOutputStream(header.size + value.size).apply {
+            write(header)
+            write(value)
+        }.toByteArray()
     }
 
-    private fun derHeader(tag: Int, length: Int): ByteArray {
-        require(length >= 0)
-        val out = ByteArrayOutputStream(6)
+    private fun derHeader(tag: Int, length: Long): ByteArray {
+        require(length >= 0L) { "Negative DER length" }
+        val out = ByteArrayOutputStream(10)
         out.write(tag)
-        when {
-            length < 0x80 -> out.write(length)
-            length <= 0xFF -> { out.write(0x81); out.write(length) }
-            length <= 0xFFFF -> { out.write(0x82); out.write((length ushr 8) and 0xFF); out.write(length and 0xFF) }
-            length <= 0xFFFFFF -> {
-                out.write(0x83); out.write((length ushr 16) and 0xFF); out.write((length ushr 8) and 0xFF); out.write(length and 0xFF)
+        if (length < 0x80L) {
+            out.write(length.toInt())
+        } else {
+            var value = length
+            var width = 0
+            val bytes = ByteArray(8)
+            while (value > 0L) {
+                bytes[7 - width] = (value and 0xFFL).toByte()
+                value = value ushr 8
+                width++
             }
-            else -> {
-                out.write(0x84); out.write((length ushr 24) and 0xFF); out.write((length ushr 16) and 0xFF)
-                out.write((length ushr 8) and 0xFF); out.write(length and 0xFF)
-            }
+            out.write(0x80 or width)
+            out.write(bytes, 8 - width, width)
         }
         return out.toByteArray()
     }
 
-    private data class DerElement(val tag: Int, val valueOffset: Int, val endOffset: Int)
+    private data class FileDerElement(
+        val tag: Int,
+        val valueOffset: Long,
+        val length: Long,
+        val endOffset: Long
+    )
 
-    private class DerReader(
-        private val data: ByteArray,
-        private val start: Int = 0,
-        private val limit: Int = data.size
-    ) {
-        private var offset = start
-
-        fun readRoot(): DerElement {
-            val root = readElement()
-            require(offset == limit) { "ASN.1 root has trailing bytes" }
-            return root
-        }
-
-        fun readAll(): List<DerElement> = buildList {
-            while (offset < limit) add(readElement())
-            require(offset == limit) { "ASN.1 child parsing ended at an invalid boundary" }
-        }
-
-        private fun readElement(): DerElement {
-            require(offset < limit) { "Unexpected end of ASN.1 data" }
-            val tag = data[offset++].toInt() and 0xFF
-            require(offset < limit) { "Missing ASN.1 length" }
-            val first = data[offset++].toInt() and 0xFF
-            val length = if ((first and 0x80) == 0) first else {
-                val count = first and 0x7F
-                require(count in 1..4) { "Unsupported ASN.1 length width: $count" }
-                require(offset + count <= limit) { "Truncated ASN.1 length" }
-                var value = 0L
-                repeat(count) { value = (value shl 8) or (data[offset++].toLong() and 0xFF) }
-                require(value <= Int.MAX_VALUE) { "ASN.1 element is too large" }
-                value.toInt()
+    private fun readElementHeader(input: RandomAccessFile, label: String): FileDerElement {
+        val tagPosition = input.filePointer
+        require(tagPosition < input.length()) { "$label ASN.1 element is truncated" }
+        val tag = input.readUnsignedByte()
+        val first = input.readUnsignedByte()
+        val length = if ((first and 0x80) == 0) {
+            first.toLong()
+        } else {
+            val count = first and 0x7F
+            require(count in 1..8) { "$label has unsupported ASN.1 length width $count" }
+            var value = 0L
+            repeat(count) {
+                val b = input.readUnsignedByte()
+                require(value <= (Long.MAX_VALUE ushr 8)) { "$label ASN.1 length overflow" }
+                value = (value shl 8) or b.toLong()
             }
-            val valueOffset = offset
-            val end = valueOffset.toLong() + length.toLong()
-            require(end <= limit.toLong()) { "ASN.1 element exceeds containing boundary" }
-            offset = end.toInt()
-            return DerElement(tag, valueOffset, offset)
+            value
         }
+        val valueOffset = input.filePointer
+        val endOffset = valueOffset + length
+        require(endOffset >= valueOffset && endOffset <= input.length()) { "$label ASN.1 element exceeds file boundary" }
+        return FileDerElement(tag, valueOffset, length, endOffset)
     }
 
     private val IMG4_MAGIC = "IMG4".toByteArray(Charsets.US_ASCII)
@@ -195,4 +270,5 @@ object RestoreImage4Personalizer {
     private const val TAG_SEQUENCE = 0x30
     private const val TAG_IA5_STRING = 0x16
     private const val TAG_CONTEXT_0_CONSTRUCTED = 0xA0
+    private const val BUFFER_SIZE = 64 * 1024
 }
