@@ -19,7 +19,7 @@
         <Button android:id="@+id/selectFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Select signed firmware" />
         <Button android:id="@+id/downloadFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Download firmware" />
         <Button android:id="@+id/cancelDownloadButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Cancel download" />
-        <Button android:id="@+id/requestTssTicketButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Request TSS ticket" />
+        <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Request TSS ticket" />
         <Button android:id="@+id/settingsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Settings" />
         <Button android:id="@+id/shareLogsButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share verbose logs" />
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:text="Activity Log" android:textSize="16sp" android:textStyle="bold" />
