@@ -78,7 +78,7 @@ class FirmwareCatalog(
     fun findDeviceByBootIds(cpid: Int, bdid: Int): Device? {
         logger("FirmwareCatalog: identify CPID=0x%04X (%d) BDID=0x%02X (%d)".format(cpid, cpid, bdid, bdid))
         val candidates = listDevices().filter { it.cpid == cpid && it.bdid == bdid }
-        return when {
+        val device = when {
             candidates.isEmpty() -> null
             candidates.size == 1 -> candidates.first()
             else -> {
@@ -86,10 +86,18 @@ class FirmwareCatalog(
                 candidates.first()
             }
         }
+        if (device != null) {
+            DeviceSupportPolicy.blockReason(device)?.let { reason ->
+                logger("FirmwareCatalog: BLOCKED: $reason")
+            }
+            DeviceSupportPolicy.requireSupported(device)
+        }
+        return device
     }
 
     fun firmwares(identifier: String, signedOnly: Boolean = false): List<Firmware> {
         require(identifier.matches(Regex("[A-Za-z0-9,._-]+"))) { "Invalid device identifier" }
+        DeviceSupportPolicy.requireSupportedIdentifier(identifier, listDevices())
         val target = "$endpoint/device/$identifier?type=ipsw"
         logger("FirmwareCatalog: GET $target")
         val root = JSONObject(get(target))
@@ -114,6 +122,7 @@ class FirmwareCatalog(
      * Cached metadata is never accepted as proof that a firmware is still signed.
      */
     fun reverifySigned(identifier: String, buildId: String): Firmware? {
+        DeviceSupportPolicy.requireSupportedIdentifier(identifier, listDevices())
         logger("FirmwareCatalog: reverify signed build $buildId for $identifier")
         val current = firmwares(identifier, signedOnly = true)
             .firstOrNull { it.buildId.equals(buildId, ignoreCase = true) }
