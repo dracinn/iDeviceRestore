@@ -73,7 +73,7 @@ object TssRequestFoundation {
         if (securityDomain == null) reasons += "ApSecurityDomain unavailable"
 
         val apNonce = nonces.apNonce
-        if (apNonce.isNullOrEmpty()) {
+        if (apNonce == null || apNonce.isEmpty()) {
             reasons += "ApNonce (NONC) unavailable from ${nonces.source}"
         }
 
