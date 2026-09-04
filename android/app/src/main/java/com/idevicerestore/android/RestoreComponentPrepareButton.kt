@@ -127,7 +127,7 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         false
                     }
 
-                    var personalizationStatus = when {
+                    var personalizationState = when {
                         matchingTicket == null && name in IM4P_COMPONENTS -> "awaiting-tss"
                         name == "RestoreRamDisk" -> "raw-payload-awaiting-im4p-wrapper"
                         else -> "not-applicable"
@@ -141,7 +141,7 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                             destinationDirectory = personalizedDir,
                             logger = { log(activity, it) }
                         )
-                        personalizationStatus = result.status
+                        personalizationState = result.status
                         personalizedFile = result.file
                         if (result.file != null) personalizedCount++
                         if (result.deferred) deferredCount++
@@ -154,12 +154,13 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         bytes = raw.bytes,
                         image4Validated = image4Validated,
                         personalizedFile = personalizedFile,
-                        personalizationStatus = personalizationStatus
+                        personalizedBytes = personalizedFile?.length(),
+                        personalizationState = personalizationState
                     )
                     log(
                         activity,
                         "Restore component preparation: $name READY bytes=${raw.bytes} image4Validated=$image4Validated " +
-                            "personalization=$personalizationStatus"
+                            "personalization=$personalizationState"
                     )
                 }
 
