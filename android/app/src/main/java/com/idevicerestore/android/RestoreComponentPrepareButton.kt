@@ -105,7 +105,7 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                     }
                     val raw = extractor.extract(ipsw, preflight, name, componentDir)
                     val image4Validated = if (name in IM4P_COMPONENTS) {
-                        Image4Personalizer.validateRawIm4p(raw.file, name)
+                        Image4StructureValidator.validateRawIm4p(raw.file, name)
                         true
                     } else {
                         require(raw.bytes > 0L) { "$name extracted as an empty file" }
@@ -130,6 +130,7 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                 )
                 completedKey = key
                 log(activity, "Restore component preparation: READY build=${firmware.buildId} identity=${preflight.identityIndex} components=${prepared.size}")
+                log(activity, "Restore component preparation: personalization deferred until component-specific Image4 rules are implemented")
                 log(activity, "Restore component preparation: STOPPED before Recovery upload")
             } catch (t: Throwable) {
                 RestoreComponentPreparationStore.clear()
