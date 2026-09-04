@@ -26,10 +26,14 @@ class FirmwareDownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CANCEL -> {
-                handle?.cancel()
-                broadcastState(STATE_CANCELLED, message = "Firmware download cancelled")
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                val active = handle
+                if (active != null) {
+                    active.cancel()
+                } else {
+                    broadcastState(STATE_CANCELLED, message = "Firmware download cancelled")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
                 return START_NOT_STICKY
             }
             ACTION_START -> startDownload(intent)
@@ -83,12 +87,13 @@ class FirmwareDownloadService : Service() {
             val now = System.currentTimeMillis()
             if (now - lastUiUpdateMs.get() >= 500L && lastUiUpdateMs.getAndSet(now) <= now) {
                 updateNotification(version, buildId, progress.downloadedBytes, progress.totalBytes)
+                // Progress is high-frequency UI state, not a diagnostic event. Keep the message empty
+                // so MainActivity updates progress/speed without appending the same log line every 500 ms.
                 broadcastState(
                     STATE_RUNNING,
                     downloaded = progress.downloadedBytes,
                     total = progress.totalBytes,
-                    bytesPerSecond = progress.bytesPerSecond,
-                    message = "Downloading from Apple CDN"
+                    bytesPerSecond = progress.bytesPerSecond
                 )
             }
         }
