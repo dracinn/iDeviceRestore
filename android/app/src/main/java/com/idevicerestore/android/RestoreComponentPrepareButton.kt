@@ -118,23 +118,39 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         log(activity, "Restore component preparation: $name not present in identity ${preflight.identityIndex}; skipped")
                         return@forEach
                     }
+
                     val raw = extractor.extract(ipsw, preflight, name, componentDir)
-                    val image4Validated = if (name in IM4P_COMPONENTS) {
-                        Image4StructureValidator.validateRawIm4p(raw.file, name)
-                        true
-                    } else {
-                        require(raw.bytes > 0L) { "$name extracted as an empty file" }
-                        false
+                    require(raw.bytes > 0L) { "$name extracted as an empty file" }
+
+                    val image4Validated = when {
+                        name == "RestoreRamDisk" -> runCatching {
+                            Image4StructureValidator.validateRawIm4p(raw.file, name)
+                            true
+                        }.getOrElse { validationError ->
+                            log(
+                                activity,
+                                "Restore component preparation: RestoreRamDisk is not a prewrapped IM4P; " +
+                                    "local personalization deferred (${validationError.message ?: validationError.javaClass.simpleName})"
+                            )
+                            false
+                        }
+                        name in REQUIRED_IM4P_COMPONENTS -> {
+                            Image4StructureValidator.validateRawIm4p(raw.file, name)
+                            true
+                        }
+                        else -> false
                     }
 
+                    val isPersonalizableIm4p = image4Validated && name in PERSONALIZABLE_COMPONENTS
                     var personalizationState = when {
-                        matchingTicket == null && name in IM4P_COMPONENTS -> "awaiting-tss"
-                        name == "RestoreRamDisk" -> "raw-payload-awaiting-im4p-wrapper"
-                        else -> "not-applicable"
+                        name == "RestoreRamDisk" && !image4Validated -> "deferred-non-im4p-ramdisk"
+                        matchingTicket == null && isPersonalizableIm4p -> "awaiting-tss"
+                        !isPersonalizableIm4p -> "not-applicable"
+                        else -> "ready-to-personalize"
                     }
                     var personalizedFile: File? = null
 
-                    if (matchingTicket != null && name in IM4P_COMPONENTS) {
+                    if (matchingTicket != null && isPersonalizableIm4p) {
                         val result = RestoreImage4Personalizer.personalizeIfSafe(
                             raw = raw,
                             ticket = matchingTicket,
@@ -145,6 +161,8 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         personalizedFile = result.file
                         if (result.file != null) personalizedCount++
                         if (result.deferred) deferredCount++
+                    } else if (matchingTicket != null && name == "RestoreRamDisk" && !image4Validated) {
+                        deferredCount++
                     }
 
                     prepared += RestoreComponentPreparationStore.PreparedComponent(
@@ -224,6 +242,7 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
     companion object {
         private const val REFRESH_MS = 1000L
         private val COMPONENTS = listOf("iBEC", "RestoreRamDisk", "RestoreDeviceTree", "RestoreSEP", "RestoreKernelCache")
-        private val IM4P_COMPONENTS = setOf("iBEC", "RestoreDeviceTree", "RestoreSEP", "RestoreKernelCache")
+        private val REQUIRED_IM4P_COMPONENTS = setOf("iBEC", "RestoreDeviceTree", "RestoreSEP", "RestoreKernelCache")
+        private val PERSONALIZABLE_COMPONENTS = setOf("iBEC", "RestoreRamDisk", "RestoreDeviceTree", "RestoreSEP", "RestoreKernelCache")
     }
 }
