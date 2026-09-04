@@ -9,6 +9,11 @@ object IbecTransitionObservationStore {
         val sourceUsbKey: String? = null,
         val startedAtElapsedMs: Long = 0L,
         val lastObservedUsbKey: String? = null,
+        val preBootStage: String? = null,
+        val preBuildVersion: String? = null,
+        val postBootStage: String? = null,
+        val postBuildVersion: String? = null,
+        val classification: String? = null,
         val message: String? = null
     )
 
@@ -20,12 +25,20 @@ object IbecTransitionObservationStore {
         current = Snapshot(State.EXECUTING, sourceUsbKey = sourceUsbKey)
     }
 
+    @Synchronized fun recordPreUpload(bootStage: String, buildVersion: String?) {
+        current = current.copy(preBootStage = bootStage, preBuildVersion = buildVersion)
+    }
+
     @Synchronized fun waiting(startedAtElapsedMs: Long) {
-        current = current.copy(state = State.WAITING_FOR_RECOVERY, startedAtElapsedMs = startedAtElapsedMs, lastObservedUsbKey = null, message = null)
+        current = current.copy(state = State.WAITING_FOR_RECOVERY, startedAtElapsedMs = startedAtElapsedMs, lastObservedUsbKey = null, postBootStage = null, postBuildVersion = null, classification = null, message = null)
     }
 
     @Synchronized fun observed(usbKey: String) {
         current = current.copy(lastObservedUsbKey = usbKey)
+    }
+
+    @Synchronized fun recordPostState(bootStage: String?, buildVersion: String?, classification: String) {
+        current = current.copy(postBootStage = bootStage, postBuildVersion = buildVersion, classification = classification)
     }
 
     @Synchronized fun succeed(message: String) {
