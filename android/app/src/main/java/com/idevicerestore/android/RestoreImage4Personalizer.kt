@@ -46,6 +46,7 @@ object RestoreImage4Personalizer {
             "Could not create restore personalization workspace: ${destinationDirectory.absolutePath}"
         }
 
+        Image4StructureValidator.validateRawIm4p(raw.file, raw.name)
         val source = raw.file.readBytes()
         val im4p = rewriteIm4pTagIfNeeded(source, targetTag)
         val img4 = stitchSimpleImg4(im4p, ticket.apImg4Ticket)
@@ -71,18 +72,22 @@ object RestoreImage4Personalizer {
     }
 
     private fun rewriteIm4pTagIfNeeded(data: ByteArray, replacement: String?): ByteArray {
-        Image4StructureValidator.validateRawIm4pBytes(data, "restore component")
         if (replacement == null) return data.copyOf()
         require(replacement.length == 4) { "IM4P replacement tag must be four characters" }
 
         val root = DerReader(data).readRoot()
+        require(root.tag == TAG_SEQUENCE) { "IM4P root is not a sequence" }
         val children = DerReader(data, root.valueOffset, root.endOffset).readAll()
         require(children.size >= 2) { "IM4P structure is incomplete" }
-        val tag = children[1]
-        require(tag.tag == TAG_IA5_STRING) { "IM4P component tag is not an IA5 string" }
-        require(tag.endOffset - tag.valueOffset == 4) { "IM4P component tag is not four bytes" }
+        require(children[0].tag == TAG_IA5_STRING) { "IM4P magic is not an IA5 string" }
+        require(data.copyOfRange(children[0].valueOffset, children[0].endOffset).contentEquals(IM4P_MAGIC)) {
+            "Component magic is not IM4P"
+        }
+        val componentTag = children[1]
+        require(componentTag.tag == TAG_IA5_STRING) { "IM4P component tag is not an IA5 string" }
+        require(componentTag.endOffset - componentTag.valueOffset == 4) { "IM4P component tag is not four bytes" }
         return data.copyOf().also { out ->
-            replacement.toByteArray(Charsets.US_ASCII).copyInto(out, tag.valueOffset)
+            replacement.toByteArray(Charsets.US_ASCII).copyInto(out, componentTag.valueOffset)
         }
     }
 
@@ -182,6 +187,7 @@ object RestoreImage4Personalizer {
     }
 
     private val IMG4_MAGIC = "IMG4".toByteArray(Charsets.US_ASCII)
+    private val IM4P_MAGIC = "IM4P".toByteArray(Charsets.US_ASCII)
     private const val TAG_SEQUENCE = 0x30
     private const val TAG_IA5_STRING = 0x16
     private const val TAG_CONTEXT_0_CONSTRUCTED = 0xA0
