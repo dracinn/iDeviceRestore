@@ -44,8 +44,10 @@ object RestoreImage4Personalizer {
             return Result(raw.name, null, "deferred-tbm-im4r", true)
         }
 
+        // Current upstream img4_stitch_component() only rewrites a small restore subset.
+        // RestoreRamDisk must already be an IM4P and is stitched with its existing rdsk tag.
         val targetTag = when (raw.name) {
-            "iBEC" -> null
+            "iBEC", "RestoreRamDisk" -> null
             "RestoreDeviceTree" -> "rdtr"
             "RestoreSEP" -> "rsep"
             "RestoreKernelCache" -> "rkrn"
