@@ -12,11 +12,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Explicit UI gate for requesting an AP/Image4 TSS ticket.
+ * Invisible automation hook for requesting an AP/Image4 TSS ticket after firmware selection.
  *
- * This component performs no DFU_DNLOAD, recovery command, reset, or mode transition. It only
- * re-verifies the selected firmware, performs read-only IPSW/DFU inspection, contacts Apple TSS,
- * and stores the returned ApImg4Ticket in process memory for the future Image4 stage.
+ * This component performs no DFU_DNLOAD, recovery command, reset, or mode transition. It waits for
+ * a freshly verified local firmware selection, then performs read-only IPSW/DFU inspection,
+ * contacts Apple TSS, and stores the returned ApImg4Ticket in process memory for Image4 preparation.
  */
 class TssTicketButton @JvmOverloads constructor(
     context: Context,
@@ -24,17 +24,18 @@ class TssTicketButton @JvmOverloads constructor(
 ) : AppCompatButton(context, attrs) {
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
+    private var lastAttemptKey: String? = null
+
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            refreshEnabledState()
+            maybeRequestTicketAutomatically()
             if (isAttachedToWindow) postDelayed(this, REFRESH_MS)
         }
     }
 
     init {
-        text = "Request TSS ticket"
+        visibility = View.GONE
         isEnabled = false
-        setOnClickListener { requestTicket() }
     }
 
     override fun onAttachedToWindow() {
@@ -49,31 +50,36 @@ class TssTicketButton @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
-    private fun refreshEnabledState() {
-        if (inFlight.get()) {
-            isEnabled = false
-            return
-        }
-        val activity = activity() ?: run {
-            isEnabled = false
-            return
-        }
+    private fun maybeRequestTicketAutomatically() {
+        if (inFlight.get()) return
+        val activity = activity() ?: return
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
         val dfu = usb.deviceList.values.firstOrNull {
             it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == AppleUsb.Mode.DFU && usb.hasPermission(it)
         }
         val buildId = selectedBuildId(activity)
         val firmwareStatus = activity.findViewById<TextView?>(R.id.firmwareStatus)?.text?.toString().orEmpty()
-        isEnabled = dfu != null && buildId != null && firmwareStatus.startsWith("Ready")
+        val ready = dfu != null && buildId != null && firmwareStatus.startsWith("Ready")
+
+        if (!ready) {
+            lastAttemptKey = null
+            return
+        }
+
+        val existing = TssTicketStore.get()
+        if (existing != null && existing.buildId.equals(buildId, ignoreCase = true)) return
+
+        val attemptKey = "$buildId:${dfu.deviceName}"
+        if (lastAttemptKey == attemptKey) return
+        lastAttemptKey = attemptKey
+        requestTicket()
     }
 
     private fun requestTicket() {
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
-        isEnabled = false
-        text = "Requesting TSS ticket…"
-        setOperation(activity, "Requesting Apple TSS ticket…", true)
-        log(activity, "TSS ticket request: explicit user action started")
+        setOperation(activity, "Requesting Apple TSS ticket automatically…", true)
+        log(activity, "TSS ticket request: automatic firmware-selection action started")
         log(activity, "TSS ticket request: no DFU upload or recovery command will be sent")
 
         worker.execute {
@@ -160,10 +166,6 @@ class TssTicketButton @JvmOverloads constructor(
                 setOperation(activity, "TSS ticket request failed: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
                 inFlight.set(false)
-                activity.runOnUiThread {
-                    text = "Request TSS ticket"
-                    refreshEnabledState()
-                }
             }
         }
     }
@@ -205,6 +207,6 @@ class TssTicketButton @JvmOverloads constructor(
     }
 
     companion object {
-        private const val REFRESH_MS = 750L
+        private const val REFRESH_MS = 500L
     }
 }
