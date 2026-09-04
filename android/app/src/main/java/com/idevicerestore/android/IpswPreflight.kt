@@ -1,13 +1,10 @@
 package com.idevicerestore.android
 
-import org.xml.sax.Attributes
-import org.xml.sax.InputSource
-import org.xml.sax.helpers.DefaultHandler
+import android.util.Xml
 import java.io.File
-import java.io.StringReader
 import java.util.Locale
 import java.util.zip.ZipFile
-import javax.xml.parsers.SAXParserFactory
+import org.xmlpull.v1.XmlPullParser
 
 /**
  * Read-only inspection of a local IPSW. This never transmits anything to the connected device.
@@ -65,42 +62,48 @@ class IpswPreflight(
                     error("Binary BuildManifest.plist is not supported yet; no restore command was sent")
                 }
 
-                logger("IPSW preflight: streaming XML manifest parser active")
-                return parseStreaming(input, request)
+                logger("IPSW preflight: native Android XmlPullParser active")
+                val parser = Xml.newPullParser().apply {
+                    setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+                    setInput(input, Charsets.UTF_8.name())
+                }
+                return parseStreaming(parser, request)
             }
         }
     }
 
-    private fun parseStreaming(input: java.io.InputStream, request: Request): Result {
+    private fun parseStreaming(parser: XmlPullParser, request: Request): Result {
         val handler = ManifestHandler(request)
-        val factory = SAXParserFactory.newInstance().apply {
-            isNamespaceAware = false
-            setFeatureIfSupported("http://xml.org/sax/features/external-general-entities", false)
-            setFeatureIfSupported("http://xml.org/sax/features/external-parameter-entities", false)
-            setFeatureIfSupported("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+        var event = parser.eventType
+        while (event != XmlPullParser.END_DOCUMENT) {
+            when (event) {
+                XmlPullParser.START_TAG -> when (parser.name) {
+                    "dict" -> handler.startDict(parser.depth)
+                    "array" -> handler.startArray(parser.depth)
+                    "key" -> {
+                        val depth = parser.depth
+                        handler.key(depth - 1, parser.nextText().trim())
+                    }
+                    "string", "integer" -> {
+                        val tag = parser.name
+                        val depth = parser.depth
+                        handler.scalar(tag, depth - 1, parser.nextText().trim())
+                    }
+                }
+                XmlPullParser.END_TAG -> when (parser.name) {
+                    "dict" -> handler.endDict(parser.depth)
+                    "array" -> handler.endArray(parser.depth)
+                }
+            }
+            event = parser.next()
         }
-        val reader = factory.newSAXParser().xmlReader.apply {
-            entityResolver = org.xml.sax.EntityResolver { _, _ -> InputSource(StringReader("")) }
-            contentHandler = handler
-            errorHandler = handler
-        }
-        reader.parse(InputSource(input))
         return handler.result()
-    }
-
-    private fun SAXParserFactory.setFeatureIfSupported(name: String, value: Boolean) {
-        runCatching { setFeature(name, value) }
-            .onFailure { logger("IPSW preflight: XML feature unsupported on this Android runtime: $name") }
     }
 
     private inner class ManifestHandler(
         private val request: Request
-    ) : DefaultHandler() {
-        private var depth = 0
+    ) {
         private val pendingKeys = mutableMapOf<Int, String>()
-        private val text = StringBuilder()
-        private var collectingTag: String? = null
-
         private var rootDictDepth: Int? = null
         private var buildIdentitiesArrayDepth: Int? = null
         private var identityDepth: Int? = null
@@ -115,19 +118,11 @@ class IpswPreflight(
         private var current: IdentityCandidate? = null
         private var best: Pair<Int, IdentityCandidate>? = null
 
-        override fun startElement(uri: String?, localName: String?, qName: String, attributes: Attributes?) {
-            depth++
-            when (qName) {
-                "dict" -> startDict()
-                "array" -> startArray()
-                "key", "string", "integer" -> {
-                    collectingTag = qName
-                    text.setLength(0)
-                }
-            }
+        fun key(ownerDepth: Int, value: String) {
+            pendingKeys[ownerDepth] = value
         }
 
-        private fun startDict() {
+        fun startDict(depth: Int) {
             val ownerDepth = depth - 1
             val openingKey = pendingKeys.remove(ownerDepth)
             if (rootDictDepth == null) rootDictDepth = depth
@@ -154,37 +149,13 @@ class IpswPreflight(
             }
         }
 
-        private fun startArray() {
+        fun startArray(depth: Int) {
             val ownerDepth = depth - 1
             val openingKey = pendingKeys.remove(ownerDepth)
-            if (openingKey == "BuildIdentities") {
-                buildIdentitiesArrayDepth = depth
-            }
+            if (openingKey == "BuildIdentities") buildIdentitiesArrayDepth = depth
         }
 
-        override fun characters(ch: CharArray, start: Int, length: Int) {
-            if (collectingTag != null) text.append(ch, start, length)
-        }
-
-        override fun endElement(uri: String?, localName: String?, qName: String) {
-            when (qName) {
-                "key" -> {
-                    pendingKeys[depth - 1] = text.toString().trim()
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "string", "integer" -> {
-                    consumeScalar(qName, text.toString().trim(), depth - 1)
-                    collectingTag = null
-                    text.setLength(0)
-                }
-                "dict" -> endDict()
-                "array" -> if (depth == buildIdentitiesArrayDepth) buildIdentitiesArrayDepth = null
-            }
-            depth--
-        }
-
-        private fun consumeScalar(tag: String, value: String, ownerDepth: Int) {
+        fun scalar(tag: String, ownerDepth: Int, value: String) {
             val key = pendingKeys.remove(ownerDepth) ?: return
             val rootDepth = rootDictDepth
             if (current == null && rootDepth != null && ownerDepth == rootDepth) {
@@ -214,7 +185,7 @@ class IpswPreflight(
             }
         }
 
-        private fun endDict() {
+        fun endDict(depth: Int) {
             componentInfoByDepth.remove(depth)
             componentByDepth.remove(depth)
             if (depth == infoDepth) infoDepth = null
@@ -234,6 +205,10 @@ class IpswPreflight(
                 componentByDepth.clear()
                 componentInfoByDepth.clear()
             }
+        }
+
+        fun endArray(depth: Int) {
+            if (depth == buildIdentitiesArrayDepth) buildIdentitiesArrayDepth = null
         }
 
         fun result(): Result {
