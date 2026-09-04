@@ -1,15 +1,9 @@
 package com.idevicerestore.android
 
-import android.app.Activity
 import android.content.Context
 import android.os.Build
 import android.os.Environment
-import android.view.View
-import android.widget.ProgressBar
-import android.widget.TextView
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 
 /**
  * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
@@ -18,6 +12,9 @@ import java.util.concurrent.Executors
  *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/IPSW/<version>-<build>/<firmware>.ipsw
  *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Metadata/catalog.json
  *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Logs/
+ *
+ * Storage is deliberately passive: it never starts firmware verification or BuildManifest parsing.
+ * The automatic preparation pipeline owns those operations after a firmware is selected and ready.
  *
  * Android 11+ requires MANAGE_EXTERNAL_STORAGE (All files access) for direct File access here.
  */
@@ -39,10 +36,6 @@ class FirmwareStorage(
         val file: File,
         val catalogCache: File
     )
-
-    private val preflightStarted = ConcurrentHashMap.newKeySet<String>()
-    private val preflightExecutor = Executors.newSingleThreadExecutor()
-    private val operationStatus by lazy { OperationStatusNotifier(context) }
 
     /** Existing user-visible project folder at the root of primary shared storage. */
     val projectRoot: File
@@ -85,14 +78,12 @@ class FirmwareStorage(
         val fileName = safeFileName(firmware.fileName).ifBlank {
             safeFileName("${firmware.identifier}_${firmware.version}_${firmware.buildId}.ipsw")
         }
-        val location = FirmwareLocation(
+        return FirmwareLocation(
             workspace = workspace,
             buildDirectory = buildDirectory,
             file = File(buildDirectory, fileName),
             catalogCache = File(workspace.metadata, "catalog.json")
         )
-        maybePreflightComplete(firmware, location.file)
-        return location
     }
 
     fun catalogCacheFor(identifier: String): File = File(prepare(identifier).metadata, "catalog.json")
@@ -127,113 +118,6 @@ class FirmwareStorage(
         partialFiles(destination).forEach { if (it.delete()) deleted++ }
         logger("FirmwareStorage: removed $deleted partial file(s) for ${firmware.identifier} ${firmware.buildId}")
         return deleted
-    }
-
-    private fun maybePreflightComplete(firmware: FirmwareCatalog.Firmware, file: File) {
-        if (!file.isFile) return
-        if (firmware.fileSize > 0L && file.length() != firmware.fileSize) return
-        val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
-        if (!preflightStarted.add(key)) return
-
-        operationStatus.requestPermissionIfPossible()
-        preflightExecutor.execute {
-            logger("IPSW preflight: local firmware is complete; starting read-only manifest inspection")
-            updateOperationUi("Restore preparation", "Checking device metadata", null)
-            operationStatus.phase(
-                "Preparing Apple firmware",
-                "Checking ${firmware.version} (${firmware.buildId}) device metadata"
-            )
-            runCatching {
-                val device = FirmwareCatalog(logger = { message -> logger("IPSW preflight catalog: $message") })
-                    .listDevices()
-                    .firstOrNull { it.identifier.equals(firmware.identifier, ignoreCase = true) }
-                    ?: error("No device metadata found for ${firmware.identifier}")
-
-                updateOperationUi("Restore preparation", "Reading BuildManifest.plist", null)
-                operationStatus.phase(
-                    "Inspecting IPSW",
-                    "Reading BuildManifest.plist for ${firmware.identifier}"
-                )
-                IpswPreflight(logger = { message ->
-                    logger(message)
-                    when {
-                        message.startsWith("IPSW preflight: BuildManifest") -> {
-                            updateOperationUi("Restore preparation", "Parsing Apple BuildManifest.plist", null)
-                            operationStatus.phase("Inspecting IPSW", "Parsing Apple BuildManifest.plist")
-                        }
-                        message.startsWith("IPSW preflight: product=") -> {
-                            updateOperationUi("Restore preparation", "Selecting matching restore identity", null)
-                            operationStatus.phase("Inspecting IPSW", "Selecting the matching restore identity")
-                        }
-                        message.startsWith("IPSW preflight: selected identity") -> {
-                            updateOperationUi("Restore preparation", "Resolving restore component paths", null)
-                            operationStatus.phase("Inspecting IPSW", "Resolving restore component paths")
-                        }
-                    }
-                }).inspect(
-                    IpswPreflight.Request(
-                        ipsw = file,
-                        identifier = firmware.identifier,
-                        boardConfig = device.boardConfig,
-                        chipId = device.cpid,
-                        boardId = device.bdid
-                    )
-                )
-            }.onSuccess { result ->
-                logger(
-                    "IPSW preflight: READY identity=${result.identityIndex} " +
-                        "board=${result.boardConfig ?: "unknown"} components=${result.componentPaths.size}; " +
-                        "no USB restore command sent"
-                )
-                updateOperationUi(
-                    "Restore preflight ready",
-                    "Identity ${result.identityIndex} • ${result.boardConfig ?: "unknown"} • ${result.componentPaths.size} components resolved",
-                    100
-                )
-                operationStatus.complete(
-                    "Firmware preflight ready",
-                    "${firmware.version} (${firmware.buildId}) — ${result.componentPaths.size} restore components resolved"
-                )
-            }.onFailure { error ->
-                logger(
-                    "IPSW preflight: FAILED ${error.javaClass.simpleName}: ${error.message}; " +
-                        "no USB restore command sent"
-                )
-                updateOperationUi(
-                    "Restore preflight failed",
-                    "${error.javaClass.simpleName}: ${error.message ?: "unknown error"}",
-                    -1
-                )
-                operationStatus.failed(
-                    "Firmware preflight failed",
-                    "${error.javaClass.simpleName}: ${error.message ?: "unknown error"}"
-                )
-            }
-        }
-    }
-
-    private fun updateOperationUi(title: String, detail: String, progress: Int?) {
-        val activity = context as? Activity ?: return
-        activity.runOnUiThread {
-            activity.findViewById<TextView>(R.id.operationTitle)?.text = title
-            activity.findViewById<TextView>(R.id.operationStatus)?.text = detail
-            activity.findViewById<ProgressBar>(R.id.operationProgress)?.apply {
-                visibility = View.VISIBLE
-                when {
-                    progress == null -> {
-                        isIndeterminate = true
-                    }
-                    progress in 0..100 -> {
-                        isIndeterminate = false
-                        this.progress = progress
-                    }
-                    else -> {
-                        isIndeterminate = false
-                        this.progress = 0
-                    }
-                }
-            }
-        }
     }
 
     private fun partialFiles(destination: File): List<File> =
