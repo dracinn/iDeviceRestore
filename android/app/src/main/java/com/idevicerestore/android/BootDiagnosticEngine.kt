@@ -84,7 +84,7 @@ class BootDiagnosticEngine(
                     val text = variable.result?.value ?: variable.error?.message ?: "no response"
                     logger.log("Recovery getenv ${variable.name}: $text")
                 }
-                recovery.console?.let { logger.log("Recovery console bytes=${it.bytesRead}") }
+                recovery.console?.let { logger.log("Recovery console bytes=${it.bytes}") }
                 recovery.consoleError?.let { logger.log("Recovery console read error: ${it.message}") }
 
                 val state = if (recovery.readiness.commandTransportReady) {
