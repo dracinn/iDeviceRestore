@@ -209,6 +209,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 val liveBuildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
                 require(liveBootStage == STAGE_1) { "Live Recovery boot-stage=$liveBootStage immediately before iBEC upload; expected Stage-1" }
                 Stage1RecoveryProofStore.refresh(initialIdentityKey, liveBootStage, liveBuildVersion)
+                IbecTransitionObservationStore.recordPreUpload(liveBootStage, liveBuildVersion)
                 log(activity, "iBEC transition pre-upload gate: live boot-stage=$liveBootStage build-version=${liveBuildVersion ?: "unknown"} elapsedMs=${proofElapsedMs(Stage1RecoveryProofStore.snapshot())}")
                 val setInterface = connection.setInterface(claimed.intf)
                 log(activity, "iBEC transition USB: claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}; setInterface=$setInterface; bulkOut=0x%02x type=${bulkOut.type} maxPacket=${bulkOut.maxPacketSize}".format(bulkOut.address))
@@ -237,27 +238,55 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         val state = IbecTransitionObservationStore.snapshot()
         val elapsed = SystemClock.elapsedRealtime() - state.startedAtElapsedMs
         val ticket = TssTicketStore.get()
-        for (device in usb.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID && usb.hasPermission(it) && usbKey(it) != state.sourceUsbKey }) {
-            val key = usbKey(device)
-            if (key != state.lastObservedUsbKey) {
-                IbecTransitionObservationStore.observed(key)
-                val continuity = if (ticket != null && foundationMatchesDevice(ticket.foundation, device)) "matched" else "MISMATCH-or-unknown"
-                log(activity, "iBEC transition observe: elapsedMs=$elapsed VID=%04x PID=%04x personality=%s mode=%s identity-continuity=%s".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device), continuity))
-            }
+        for (device in usb.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID && usb.hasPermission(it) }) {
             val sameDevice = ticket != null && foundationMatchesDevice(ticket.foundation, device)
-            if (sameDevice && AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY) {
-                IbecTransitionObservationStore.succeed("Recovery re-enumeration accepted")
-                log(activity, "iBEC transition RESULT: Recovery re-enumeration accepted elapsedMs=$elapsed; STOPPED before restore-OS component upload")
-                text = "iBEC Transition Observed"
-                setOperation(activity, "iBEC transition observed in Recovery; stopped before restore-OS payloads", false)
-                return
+            if (!sameDevice || AppleUsb.mode(device) != AppleUsb.Mode.RECOVERY) continue
+
+            val key = usbKey(device)
+            var connection: android.hardware.usb.UsbDeviceConnection? = null
+            try {
+                connection = usb.openDevice(device) ?: error("openDevice failed for post-iBEC Recovery classification")
+                val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim post-iBEC Recovery interface")
+                val transport = RecoveryTransport(connection, claimed.bulkIn)
+                val postBootStage = transport.getenv("boot-stage").value.trim()
+                val postBuildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
+                val buildChanged = state.preBuildVersion != null && postBuildVersion != null && !state.preBuildVersion.equals(postBuildVersion, true)
+                val usbKeyChanged = key != state.sourceUsbKey
+                val classification = when {
+                    postBootStage != state.preBootStage -> "boot-stage-changed"
+                    buildChanged -> "stage1-build-changed"
+                    usbKeyChanged -> "reenumerated-same-build"
+                    else -> "same-usb-same-build"
+                }
+                val previous = IbecTransitionObservationStore.snapshot()
+                IbecTransitionObservationStore.recordPostState(postBootStage, postBuildVersion, classification)
+                if (previous.postBootStage != postBootStage || previous.postBuildVersion != postBuildVersion || previous.classification != classification || previous.lastObservedUsbKey != key) {
+                    IbecTransitionObservationStore.observed(key)
+                    log(activity, "iBEC transition observe: elapsedMs=$elapsed VID=%04x PID=%04x personality=%s mode=%s identity-continuity=matched preBootStage=${state.preBootStage ?: "unknown"} postBootStage=$postBootStage preBuild=${state.preBuildVersion ?: "unknown"} postBuild=${postBuildVersion ?: "unknown"} classification=$classification usbKeyChanged=$usbKeyChanged".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device)))
+                }
+                if (buildChanged || usbKeyChanged || postBootStage != state.preBootStage) {
+                    IbecTransitionObservationStore.succeed("Recovery post-iBEC state classified as $classification")
+                    log(activity, "iBEC transition RESULT: classification=$classification elapsedMs=$elapsed preBuild=${state.preBuildVersion ?: "unknown"} postBuild=${postBuildVersion ?: "unknown"} preBootStage=${state.preBootStage ?: "unknown"} postBootStage=$postBootStage; STOPPED before restore-OS component upload")
+                    text = "iBEC Transition Observed"
+                    setOperation(activity, "iBEC transition observed ($classification); stopped before restore-OS payloads", false)
+                    return
+                }
+            } catch (t: Throwable) {
+                val previous = IbecTransitionObservationStore.snapshot()
+                if (previous.classification != "post-state-unreadable") {
+                    IbecTransitionObservationStore.recordPostState(null, null, "post-state-unreadable")
+                    log(activity, "iBEC transition observe: elapsedMs=$elapsed post-state read unavailable: ${t.javaClass.simpleName}: ${t.message}; continuing observation")
+                }
+            } finally {
+                connection?.close()
             }
         }
         if (elapsed >= RECOVERY_RECONNECT_TIMEOUT_MS) {
-            IbecTransitionObservationStore.fail("Timed out waiting for same-device Recovery after iBEC")
-            log(activity, "iBEC transition RESULT: timeout elapsedMs=$elapsed waiting for same-device Recovery; test stopped and may be retried")
+            val finalState = IbecTransitionObservationStore.snapshot()
+            IbecTransitionObservationStore.fail("Timed out waiting for classified same-device Recovery after iBEC")
+            log(activity, "iBEC transition RESULT: timeout elapsedMs=$elapsed preBuild=${finalState.preBuildVersion ?: "unknown"} postBuild=${finalState.postBuildVersion ?: "unknown"} classification=${finalState.classification ?: "none"}; test stopped and may be retried")
             text = READY_LABEL
-            setOperation(activity, "iBEC transition timed out waiting for Recovery; test stopped", false)
+            setOperation(activity, "iBEC transition timed out waiting for a classified Recovery state; test stopped", false)
         }
     }
 
