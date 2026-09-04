@@ -214,7 +214,7 @@ class MainActivity : AppCompatActivity() {
             log(AppleUsb.interfaceSummary(device))
             if (usbManager.hasPermission(device)) log(AppleUsb.bootIdentifierSummary(device))
         }
-        val preferred = apple.firstOrNull { AppleUsb.mode(it) != AppleUsb.Mode.APPLE_OTHER } ?: apple.firstOrNull()
+        val preferred = apple.firstOrNull { AppleUsb.personality(it) != AppleUsb.Personality.APPLE_OTHER } ?: apple.firstOrNull()
         selected = preferred
         if (preferred == null) {
             lastAutoProbeDeviceName = null
@@ -254,8 +254,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun maybeAutoProbe(device: UsbDevice, reason: String) {
         if (!usbManager.hasPermission(device)) return
-        if (AppleUsb.mode(device) == AppleUsb.Mode.APPLE_OTHER) {
-            log("Automatic probe skipped: unsupported Apple USB mode")
+        val personality = AppleUsb.personality(device)
+        if (personality == AppleUsb.Personality.APPLE_OTHER) {
+            log("Automatic probe skipped: unsupported Apple USB personality")
             return
         }
         if (probeInFlight) {
@@ -289,7 +290,11 @@ class MainActivity : AppCompatActivity() {
         probeLogging = true
         binding.probeButton.isEnabled = false
         val source = if (manual) "manual" else "automatic"
-        probeLog("Probe requested ($source): mode=${AppleUsb.mode(device)} VID=%04x PID=%04x".format(device.vendorId, device.productId))
+        val personality = AppleUsb.personality(device)
+        probeLog(
+            "Probe requested ($source): personality=$personality mode=${AppleUsb.mode(device)} " +
+                "VID=%04x PID=%04x".format(device.vendorId, device.productId)
+        )
         worker.execute {
             val connection = usbManager.openDevice(device)
             if (connection == null) {
@@ -399,7 +404,27 @@ class MainActivity : AppCompatActivity() {
                             logUi("Recovery console: skipped in WTF mode")
                         }
                     }
-                    AppleUsb.Mode.APPLE_OTHER -> logUi("Apple device is not classified as DFU/recovery; no command sent.")
+                    AppleUsb.Mode.APPLE_OTHER -> when (personality) {
+                        AppleUsb.Personality.PORT_DFU -> {
+                            logUi("Port DFU diagnostic: requesting read-only Apple nonce descriptor")
+                            runCatching { DfuNonceInfo.fromConnection(device, connection) }
+                                .onSuccess { nonceInfo ->
+                                    logUi(nonceInfo.summary())
+                                    if (!nonceInfo.readyForApTss) {
+                                        logUi("Port DFU TSS readiness: blocked until ApNonce is available")
+                                    }
+                                }
+                                .onFailure {
+                                    logUi("Port DFU nonce descriptor unavailable: ${it.javaClass.simpleName}: ${it.message}")
+                                }
+                            logUi("Port DFU diagnostic complete: no classic DFU state/status, download, manifestation, reset, or transition request sent")
+                        }
+                        AppleUsb.Personality.KIS -> {
+                            logUi("KIS diagnostic: identity and interface layout recorded")
+                            logUi("KIS diagnostic complete: no KIS portal request sent")
+                        }
+                        else -> logUi("Apple device is not classified as a supported diagnostic personality; no command sent.")
+                    }
                 }
             } catch (t: Throwable) {
                 logUi("Probe exception: ${t.javaClass.name}: ${t.message}")
