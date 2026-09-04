@@ -12,9 +12,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Hidden automatic coordinator that resolves, extracts, validates, and when safe locally
- * personalizes restore components. It performs no USB I/O and never sends an iBoot command or
- * image upload.
+ * Hidden automatic coordinator that resolves, validates, and when possible locally personalizes
+ * restore components. It performs no USB I/O and never sends an iBoot command or image upload.
  */
 class RestoreComponentPrepareButton @JvmOverloads constructor(
     context: Context,
@@ -58,9 +57,11 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
         val ipsw = reflected<File>(activity, "firmwareDestination") ?: return
         if (!ipsw.isFile) return
 
-        val ticket = TssTicketStore.get()
-        val ticketStamp = if (ticket?.buildId.equals(firmware.buildId, ignoreCase = true)) ticket?.obtainedAtMillis ?: 0L else 0L
-        val key = "${firmware.buildId}:${ipsw.length()}:${ipsw.lastModified()}:$ticketStamp"
+        val ticket = TssTicketStore.get()?.takeIf {
+            it.buildId.equals(firmware.buildId, ignoreCase = true)
+        }
+        val ticketKey = ticket?.let { ":tss:${it.identityIndex}:${it.obtainedAtMillis}" } ?: ":no-tss"
+        val key = "${firmware.buildId}:${ipsw.length()}:${ipsw.lastModified()}$ticketKey"
         if (completedKey == key) return
         prepare(activity, device, firmware, ipsw, ticket, key)
     }
@@ -96,13 +97,11 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                     "BuildManifest build ${preflight.productBuildVersion} does not match selected build ${firmware.buildId}"
                 }
 
-                val usableTicket = ticket?.takeIf {
-                    it.buildId.equals(firmware.buildId, ignoreCase = true) && it.identityIndex == preflight.identityIndex
-                }
-                if (usableTicket == null) {
+                val matchingTicket = ticket?.takeIf { it.identityIndex == preflight.identityIndex }
+                if (matchingTicket == null) {
                     log(activity, "Restore component personalization: no matching TSS ticket in this app session; extraction/validation only")
                 } else {
-                    log(activity, "Restore component personalization: matching TSS ticket available; TBM entries=${usableTicket.componentTbm.size}")
+                    log(activity, "Restore component personalization: matching TSS ticket available identity=${matchingTicket.identityIndex}")
                 }
 
                 val buildDir = ipsw.parentFile ?: error("IPSW build directory is unavailable")
@@ -110,6 +109,8 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                 val personalizedDir = File(buildDir, "Personalized/RestorePreparation")
                 val extractor = IpswComponentExtractor(logger = { log(activity, it) })
                 val prepared = mutableListOf<RestoreComponentPreparationStore.PreparedComponent>()
+                var personalizedCount = 0
+                var deferredCount = 0
 
                 COMPONENTS.forEach { name ->
                     val path = preflight.componentPaths[name]
@@ -126,30 +127,24 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         false
                     }
 
+                    var personalizationStatus = when {
+                        matchingTicket == null && name in IM4P_COMPONENTS -> "awaiting-tss"
+                        name == "RestoreRamDisk" -> "raw-payload-awaiting-im4p-wrapper"
+                        else -> "not-applicable"
+                    }
                     var personalizedFile: File? = null
-                    var personalizedBytes: Long? = null
-                    var personalizationState = if (name == "RestoreRamDisk") "raw-payload-awaiting-im4p-wrapper" else "awaiting-tss"
 
-                    if (name in IM4P_COMPONENTS && usableTicket != null) {
-                        val tbm = usableTicket.componentTbm[name]
-                        if (tbm != null) {
-                            personalizationState = "deferred-tbm-im4r-required"
-                            log(
-                                activity,
-                                "Restore component personalization: $name DEFERRED because Apple TSS returned ${name}-TBM " +
-                                    "(ucon=${tbm.ucon?.size ?: 0} bytes ucer=${tbm.ucer?.size ?: 0} bytes); no simplified IMG4 emitted"
-                            )
-                        } else {
-                            val result = RestoreComponentImage4Personalizer.personalize(
-                                raw = raw,
-                                ticket = usableTicket,
-                                destinationDirectory = personalizedDir,
-                                logger = { log(activity, it) }
-                            )
-                            personalizedFile = result.file
-                            personalizedBytes = result.personalizedBytes
-                            personalizationState = "personalized-no-tbm"
-                        }
+                    if (matchingTicket != null && name in IM4P_COMPONENTS) {
+                        val result = RestoreImage4Personalizer.personalizeIfSafe(
+                            raw = raw,
+                            ticket = matchingTicket,
+                            destinationDirectory = personalizedDir,
+                            logger = { log(activity, it) }
+                        )
+                        personalizationStatus = result.status
+                        personalizedFile = result.file
+                        if (result.file != null) personalizedCount++
+                        if (result.deferred) deferredCount++
                     }
 
                     prepared += RestoreComponentPreparationStore.PreparedComponent(
@@ -159,13 +154,12 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         bytes = raw.bytes,
                         image4Validated = image4Validated,
                         personalizedFile = personalizedFile,
-                        personalizedBytes = personalizedBytes,
-                        personalizationState = personalizationState
+                        personalizationStatus = personalizationStatus
                     )
                     log(
                         activity,
                         "Restore component preparation: $name READY bytes=${raw.bytes} image4Validated=$image4Validated " +
-                            "personalization=$personalizationState"
+                            "personalization=$personalizationStatus"
                     )
                 }
 
@@ -176,14 +170,19 @@ class RestoreComponentPrepareButton @JvmOverloads constructor(
                         components = prepared
                     )
                 )
-                completedKey = key
-                val personalizedCount = prepared.count { it.personalizedFile != null }
-                val deferredCount = prepared.count { it.personalizationState.startsWith("deferred") }
+
+                // Extraction-only is intentionally not terminal. When a matching TSS ticket arrives,
+                // the key changes and this coordinator automatically performs the personalization pass.
+                if (matchingTicket != null) completedKey = key
+
                 log(
                     activity,
                     "Restore component preparation: READY build=${firmware.buildId} identity=${preflight.identityIndex} " +
                         "components=${prepared.size} personalized=$personalizedCount deferred=$deferredCount"
                 )
+                if (matchingTicket == null) {
+                    log(activity, "Restore component preparation: personalization remains pending until matching TSS is available")
+                }
                 log(activity, "Restore component preparation: STOPPED before Recovery upload")
             } catch (t: Throwable) {
                 RestoreComponentPreparationStore.clear()
