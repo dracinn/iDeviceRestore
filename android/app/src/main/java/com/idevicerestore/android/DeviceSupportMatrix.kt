@@ -34,8 +34,8 @@ object DeviceSupportMatrix {
     private val blockedMacIdentifierPrefixes = listOf("Mac15,", "Mac16,", "Mac17,")
     private val blockedChipName = Regex("(?i)(?:^|[\\s,(])M[345](?=$|[\\s,)])")
 
-    // Apple silicon Macs for which upstream evidence demonstrates useful DFU/Recovery and
-    // firmware-preparation behavior, but not sufficiently reliable end-to-end restore success.
+    // M1/M2 families remain experimental as a restore-support status, but this list must not be
+    // treated as evidence that every model has passed each individual protocol stage.
     private val experimentalMacIdentifiers = listOf(
         Regex("(?i)^MacBookAir10,1$"),
         Regex("(?i)^MacBookPro17,1$"),
@@ -46,6 +46,29 @@ object DeviceSupportMatrix {
         Regex("(?i)^Mac14,\\d+$")
     )
     private val experimentalChipName = Regex("(?i)(?:^|[\\s,(])M[12](?=$|[\\s,)])")
+
+    // Only identifiers with explicit restore-stage evidence belong here. Add capabilities narrowly
+    // as hardware or upstream logs demonstrate them; do not infer them from chip generation alone.
+    private val evidencedCapabilitiesByIdentifier = mapOf(
+        "macbookair10,1" to setOf(
+            Capability.IDENTIFICATION,
+            Capability.RECOVERY_COMMUNICATION,
+            Capability.DFU_COMMUNICATION,
+            Capability.FIRMWARE_PREPARATION
+        ),
+        "macbookpro17,1" to setOf(
+            Capability.IDENTIFICATION,
+            Capability.RECOVERY_COMMUNICATION,
+            Capability.DFU_COMMUNICATION,
+            Capability.FIRMWARE_PREPARATION
+        ),
+        "mac14,2" to setOf(
+            Capability.IDENTIFICATION,
+            Capability.RECOVERY_COMMUNICATION,
+            Capability.DFU_COMMUNICATION,
+            Capability.FIRMWARE_PREPARATION
+        )
+    )
 
     fun assess(device: FirmwareCatalog.Device): Assessment {
         if (!isMac(device)) {
@@ -65,16 +88,7 @@ object DeviceSupportMatrix {
         }
 
         if (isExperimentalAppleSiliconMac(device.identifier, device.name)) {
-            return Assessment(
-                SupportStatus.EXPERIMENTAL,
-                setOf(
-                    Capability.IDENTIFICATION,
-                    Capability.RECOVERY_COMMUNICATION,
-                    Capability.DFU_COMMUNICATION,
-                    Capability.FIRMWARE_PREPARATION
-                ),
-                "M1 and M2 Mac restore support is experimental until an end-to-end restore is validated"
-            )
+            return experimentalAssessment(device.identifier)
         }
 
         return Assessment(
@@ -98,22 +112,28 @@ object DeviceSupportMatrix {
         }
 
         if (experimentalMacIdentifiers.any { it.matches(identifier) }) {
-            return Assessment(
-                SupportStatus.EXPERIMENTAL,
-                setOf(
-                    Capability.IDENTIFICATION,
-                    Capability.RECOVERY_COMMUNICATION,
-                    Capability.DFU_COMMUNICATION,
-                    Capability.FIRMWARE_PREPARATION
-                ),
-                "M1 and M2 Mac restore support is experimental until an end-to-end restore is validated"
-            )
+            return experimentalAssessment(identifier)
         }
 
         return Assessment(
             SupportStatus.UNKNOWN,
             setOf(Capability.IDENTIFICATION),
             "Device identifier is not yet classified by the iDeviceRestore support matrix"
+        )
+    }
+
+    private fun experimentalAssessment(identifier: String): Assessment {
+        val capabilities = evidencedCapabilitiesByIdentifier[identifier.lowercase()]
+            ?: setOf(Capability.IDENTIFICATION)
+        val hasProtocolEvidence = capabilities.size > 1
+        return Assessment(
+            SupportStatus.EXPERIMENTAL,
+            capabilities,
+            if (hasProtocolEvidence) {
+                "M1/M2 Mac restore support is experimental; this model has evidence for partial restore stages but not a validated end-to-end restore"
+            } else {
+                "M1/M2 Mac restore support is experimental; protocol-stage capabilities are not yet evidenced for this model"
+            }
         )
     }
 
