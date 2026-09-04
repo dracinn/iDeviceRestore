@@ -89,13 +89,21 @@ class RecoveryUploadTransport(
             )
             if (written < 0) {
                 throw IOException(
-                    "Recovery bulk upload failed at packet $packetIndex: endpoint=0x%02X result=%d"
-                        .format(bulkOut.address, written)
+                    "Recovery bulk upload failed at packet $packetIndex: endpoint=0x%02X type=%d maxPacket=%d requested=%d timeoutMs=%d result=%d"
+                        .format(
+                            bulkOut.address,
+                            bulkOut.type,
+                            bulkOut.maxPacketSize,
+                            wanted,
+                            USB_TIMEOUT_MS,
+                            written
+                        )
                 )
             }
             if (written != wanted) {
                 throw IOException(
-                    "Recovery bulk upload short write at packet $packetIndex: expected $wanted, got $written"
+                    "Recovery bulk upload short write at packet $packetIndex: endpoint=0x%02X maxPacket=%d expected=%d got=%d"
+                        .format(bulkOut.address, bulkOut.maxPacketSize, wanted, written)
                 )
             }
 

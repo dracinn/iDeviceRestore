@@ -147,6 +147,9 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 connection = usb.openDevice(device) ?: error("openDevice failed for iBEC transition test")
                 val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim Recovery interface")
                 val bulkOut = claimed.bulkOut ?: error("Recovery bulk OUT endpoint unavailable")
+                val setInterface = connection.setInterface(claimed.intf)
+                log(activity, "iBEC transition USB: claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}; setInterface=$setInterface; bulkOut=0x%02x type=${bulkOut.type} maxPacket=${bulkOut.maxPacketSize}".format(bulkOut.address))
+                require(setInterface) { "Android could not activate claimed Recovery interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting}" }
                 val session = RecoveryComponentSession(device, RecoveryTransport(connection, claimed.bulkIn), connection, bulkOut)
                 val uploaded = session.uploadFile(RecoveryComponentSession.Component.IBEC, file) { p -> setProgress(activity, p.percent) }
                 log(activity, "iBEC transition test: upload complete bytes=${uploaded.bytes} packets=${uploaded.packets} endpoint=0x%02x".format(uploaded.endpointAddress))
