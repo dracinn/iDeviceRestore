@@ -12,11 +12,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Explicit UI gate for extracting, personalizing, and validating iBSS.
+ * Hidden automatic coordinator for extracting, personalizing, and validating iBSS.
  *
- * This component performs no USB I/O. It requires an in-memory TSS ticket from the current app
- * session, re-verifies the selected firmware, resolves the same BuildIdentity, extracts raw iBSS,
- * creates the IMG4 wrapper, validates it, and stops before any DFU upload session is constructed.
+ * Once a selected firmware is ready and a matching in-memory TSS ticket exists, this component
+ * automatically re-verifies the build, resolves the same BuildIdentity, extracts raw iBSS,
+ * creates and validates the IMG4 wrapper, then stops before any DFU upload is constructed.
  */
 class Image4PrepareButton @JvmOverloads constructor(
     context: Context,
@@ -24,17 +24,18 @@ class Image4PrepareButton @JvmOverloads constructor(
 ) : AppCompatButton(context, attrs) {
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
+    @Volatile private var completedKey: String? = null
+
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            refreshEnabledState()
+            refreshAutomaticState()
             if (isAttachedToWindow) postDelayed(this, REFRESH_MS)
         }
     }
 
     init {
-        text = "Prepare personalized iBSS"
+        visibility = View.GONE
         isEnabled = false
-        setOnClickListener { prepareIbss() }
     }
 
     override fun onAttachedToWindow() {
@@ -49,28 +50,24 @@ class Image4PrepareButton @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
-    private fun refreshEnabledState() {
-        if (inFlight.get()) {
-            isEnabled = false
-            return
-        }
-        val activity = activity() ?: run {
-            isEnabled = false
-            return
-        }
-        val buildId = selectedBuildId(activity)
+    private fun refreshAutomaticState() {
+        if (inFlight.get()) return
+        val activity = activity() ?: return
+        val buildId = selectedBuildId(activity) ?: return
         val firmwareStatus = activity.findViewById<TextView?>(R.id.firmwareStatus)?.text?.toString().orEmpty()
-        val ticket = TssTicketStore.get()
-        isEnabled = buildId != null && firmwareStatus.startsWith("Ready") && ticket?.buildId == buildId
+        if (!firmwareStatus.startsWith("Ready")) return
+        val ticket = TssTicketStore.get() ?: return
+        if (ticket.buildId != buildId) return
+        val key = "$buildId:${ticket.identityIndex}:${ticket.obtainedAtMillis}"
+        if (completedKey == key) return
+        prepareIbssAutomatically(key)
     }
 
-    private fun prepareIbss() {
+    private fun prepareIbssAutomatically(key: String) {
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
-        isEnabled = false
-        text = "Preparing personalized iBSS…"
         setOperation(activity, "Preparing personalized iBSS…", true)
-        log(activity, "Image4 preparation: explicit user action started")
+        log(activity, "Image4 preparation: automatic firmware-preparation stage started")
         log(activity, "Image4 preparation: no USB command will be sent")
 
         worker.execute {
@@ -137,6 +134,7 @@ class Image4PrepareButton @JvmOverloads constructor(
                         sourceManifestPath = raw.manifestPath
                     )
                 )
+                completedKey = key
                 log(activity, "Image4 preparation: structural validation PASSED")
                 log(
                     activity,
@@ -145,17 +143,13 @@ class Image4PrepareButton @JvmOverloads constructor(
                 )
                 log(activity, "Image4 preparation: output=${personalized.file.absolutePath}")
                 log(activity, "Image4 preparation: STOPPED before DFU upload")
-                setOperation(activity, "Personalized iBSS ready — DFU upload remains disabled", false)
+                setOperation(activity, "Firmware preparation ready — restore upload has not started", false)
             } catch (t: Throwable) {
                 Image4PreparationStore.clear()
                 log(activity, "Image4 preparation FAILED: ${t.javaClass.simpleName}: ${t.message}")
                 setOperation(activity, "iBSS preparation failed: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
                 inFlight.set(false)
-                activity.runOnUiThread {
-                    text = "Prepare personalized iBSS"
-                    refreshEnabledState()
-                }
             }
         }
     }
