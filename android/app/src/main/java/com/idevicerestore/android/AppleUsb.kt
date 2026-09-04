@@ -16,7 +16,16 @@ object AppleUsb {
     private val wtfPids = setOf(0x1222)
     private val bootIdRegex = Regex("\\b(CPID|CPRV|CPFM|SCEP|BDID|ECID|IBFL|PREV):([0-9A-Fa-f]+)\\b")
 
-    enum class Mode { DFU, PORT_DFU, RECOVERY, KIS, WTF, APPLE_OTHER }
+    enum class Mode { DFU, RECOVERY, WTF, APPLE_OTHER }
+
+    enum class Personality {
+        DFU,
+        PORT_DFU,
+        RECOVERY,
+        KIS,
+        WTF,
+        APPLE_OTHER
+    }
 
     data class BootIdentifiers(
         val rawSerial: String,
@@ -36,18 +45,33 @@ object AppleUsb {
             get() = ibflHex?.toLongOrNull(16)?.let { flags -> flags and IBOOT_FLAG_IMAGE4_AWARE != 0L }
     }
 
-    fun mode(device: UsbDevice): Mode = when (device.productId) {
-        in dfuPids -> Mode.DFU
-        in portDfuPids -> Mode.PORT_DFU
-        in recoveryPids -> Mode.RECOVERY
-        in kisPids -> Mode.KIS
-        in wtfPids -> Mode.WTF
-        else -> Mode.APPLE_OTHER
+    fun personality(device: UsbDevice): Personality = when (device.productId) {
+        in dfuPids -> Personality.DFU
+        in portDfuPids -> Personality.PORT_DFU
+        in recoveryPids -> Personality.RECOVERY
+        in kisPids -> Personality.KIS
+        in wtfPids -> Personality.WTF
+        else -> Personality.APPLE_OTHER
+    }
+
+    /**
+     * Existing operational modes intentionally exclude Port DFU and KIS. Those newer identities
+     * are discovery-only until their transports are implemented and hardware-tested.
+     */
+    fun mode(device: UsbDevice): Mode = when (personality(device)) {
+        Personality.DFU -> Mode.DFU
+        Personality.RECOVERY -> Mode.RECOVERY
+        Personality.WTF -> Mode.WTF
+        Personality.PORT_DFU, Personality.KIS, Personality.APPLE_OTHER -> Mode.APPLE_OTHER
     }
 
     fun describe(device: UsbDevice): String = buildString {
+        val personality = personality(device)
         append("VID=%04x PID=%04x".format(device.vendorId, device.productId))
         append(" mode=${mode(device)}")
+        if (personality == Personality.PORT_DFU || personality == Personality.KIS) {
+            append(" personality=$personality")
+        }
         append(" interfaces=${device.interfaceCount}")
         runCatching { device.productName }.getOrNull()?.let { append(" product=$it") }
         runCatching { device.manufacturerName }.getOrNull()?.let { append(" manufacturer=$it") }
@@ -136,7 +160,7 @@ object AppleUsb {
 
     fun claimBestInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
         val candidates = mutableListOf<Candidate>()
-        val deviceMode = mode(device)
+        val personality = personality(device)
 
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
@@ -152,8 +176,8 @@ object AppleUsb {
                 }
             }
 
-            val score = when (deviceMode) {
-                Mode.RECOVERY -> {
+            val score = when (personality) {
+                Personality.RECOVERY -> {
                     var s = 0
                     if (intf.id == 0) s += 500
                     if (intf.alternateSetting == 0) s += 100
@@ -161,7 +185,7 @@ object AppleUsb {
                     if (bulkOut != null) s += 10
                     s
                 }
-                Mode.WTF, Mode.DFU, Mode.PORT_DFU -> {
+                Personality.WTF, Personality.DFU, Personality.PORT_DFU -> {
                     var s = 0
                     if (intf.id == 0) s += 200
                     if (intf.alternateSetting == 0) s += 100
@@ -170,7 +194,7 @@ object AppleUsb {
                     if (intf.endpointCount == 0) s += 10
                     s
                 }
-                Mode.KIS, Mode.APPLE_OTHER -> {
+                Personality.KIS, Personality.APPLE_OTHER -> {
                     var s = 0
                     if (intf.id == 0) s += 100
                     if (intf.alternateSetting == 0) s += 50
