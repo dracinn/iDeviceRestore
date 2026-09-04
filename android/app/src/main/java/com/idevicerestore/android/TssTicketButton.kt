@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * This component performs no DFU_DNLOAD, recovery command, reset, or mode transition. It waits for
  * a freshly verified local firmware selection, then performs read-only IPSW/DFU inspection,
- * contacts Apple TSS, and stores the returned ApImg4Ticket in process memory for Image4 preparation.
+ * contacts Apple TSS, and stores both the returned ApImg4Ticket and the exact verified preparation
+ * context for downstream automatic stages.
  */
 class TssTicketButton @JvmOverloads constructor(
     context: Context,
@@ -67,7 +68,9 @@ class TssTicketButton @JvmOverloads constructor(
         }
 
         val existing = TssTicketStore.get()
-        if (existing != null && existing.buildId.equals(buildId, ignoreCase = true)) return
+        val prepared = FirmwarePreparationStore.get()
+        if (existing != null && existing.buildId.equals(buildId, ignoreCase = true) &&
+            prepared?.matches(buildId, existing.identityIndex) == true) return
 
         val attemptKey = "$buildId:${dfu.deviceName}"
         if (lastAttemptKey == attemptKey) return
@@ -78,7 +81,7 @@ class TssTicketButton @JvmOverloads constructor(
     private fun requestTicket() {
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
-        setOperation(activity, "Requesting Apple TSS ticket automatically…", true)
+        setOperation(activity, "Preparing firmware signing context…", true)
         log(activity, "TSS ticket request: automatic firmware-selection action started")
         log(activity, "TSS ticket request: no DFU upload or recovery command will be sent")
 
@@ -126,6 +129,19 @@ class TssTicketButton @JvmOverloads constructor(
                         boardId = catalogDevice.bdid
                     )
                 )
+                FirmwarePreparationStore.put(
+                    FirmwarePreparationStore.Context(
+                        device = catalogDevice,
+                        firmware = firmware,
+                        location = location,
+                        preflight = preflight
+                    )
+                )
+                log(
+                    activity,
+                    "Firmware preparation context: cached build=${firmware.buildId} identity=${preflight.identityIndex} " +
+                        "components=${preflight.componentPaths.size}"
+                )
                 log(
                     activity,
                     "TSS ticket request: preflight READY identity=${preflight.identityIndex} board=${preflight.boardConfig ?: "unknown"}"
@@ -155,13 +171,15 @@ class TssTicketButton @JvmOverloads constructor(
                         "TSS ticket request: SUCCESS build=${firmware.buildId} identity=${preflight.identityIndex} " +
                             "ApImg4Ticket=${result.apImg4Ticket.size} bytes"
                     )
-                    setOperation(activity, "TSS ticket ready — Image4 personalization can proceed", false)
+                    setOperation(activity, "TSS ticket ready — continuing firmware preparation", false)
                 } finally {
                     connection.close()
                     log(activity, "TSS ticket request: USB connection closed; DFU state was not changed")
                 }
             } catch (t: Throwable) {
+                FirmwarePreparationStore.clear()
                 TssTicketStore.clear()
+                Image4PreparationStore.clear()
                 log(activity, "TSS ticket request FAILED: ${t.javaClass.simpleName}: ${t.message}")
                 setOperation(activity, "TSS ticket request failed: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
