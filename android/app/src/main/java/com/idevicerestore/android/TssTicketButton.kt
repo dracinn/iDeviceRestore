@@ -158,13 +158,20 @@ class TssTicketButton @JvmOverloads constructor(
 
                     val result = TssSigningSession(logger = { log(activity, it) })
                         .requestApImg4Ticket(device, connection, ipsw, preflight)
+                    val tbm = extractComponentTbm(result.response.plist)
                     TssTicketStore.put(
                         TssTicketStore.Ticket(
                             buildId = firmware.buildId,
                             identityIndex = preflight.identityIndex,
                             foundation = result.foundation,
-                            apImg4Ticket = result.apImg4Ticket
+                            apImg4Ticket = result.apImg4Ticket,
+                            componentTbm = tbm
                         )
+                    )
+                    log(
+                        activity,
+                        "TSS ticket request: component TBM metadata entries=${tbm.size} " +
+                            "(${tbm.keys.sorted().joinToString(",").ifBlank { "none" }})"
                     )
                     log(
                         activity,
@@ -186,6 +193,19 @@ class TssTicketButton @JvmOverloads constructor(
                 inFlight.set(false)
             }
         }
+    }
+
+    private fun extractComponentTbm(plist: PlistNode.Dict?): Map<String, TssTicketStore.TbmData> {
+        if (plist == null) return emptyMap()
+        val result = linkedMapOf<String, TssTicketStore.TbmData>()
+        plist.values.forEach { (key, node) ->
+            if (!key.endsWith("-TBM") || node !is PlistNode.Dict) return@forEach
+            val component = key.removeSuffix("-TBM")
+            val ucon = node.data("ucon")
+            val ucer = node.data("ucer")
+            result[component] = TssTicketStore.TbmData(ucon?.copyOf(), ucer?.copyOf())
+        }
+        return result
     }
 
     private fun selectedBuildId(activity: AppCompatActivity): String? {
