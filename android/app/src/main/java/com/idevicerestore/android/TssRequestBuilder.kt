@@ -3,166 +3,179 @@ package com.idevicerestore.android
 import java.util.Locale
 import java.util.UUID
 
-/** Builds the AP IMG4 TSS request using current libtatsu semantics. */
+/**
+ * Builds the AP/Image4 TSS request using current libtatsu rules.
+ * This is a pure builder: it performs no network request and sends nothing to USB.
+ */
 object TssRequestBuilder {
-    data class BuildResult(
-        val request: PlistValue.Dict,
+    data class Result(
+        val request: PlistNode.Dict,
         val componentCount: Int,
         val identityIndex: Int
     ) {
-        fun xml(): ByteArray = XmlPlistCodec.toXml(request)
+        fun xml(): ByteArray = TssPlistSerializer.serialize(request)
+        fun summary(): String =
+            "TSS request: identity=$identityIndex components=$componentCount " +
+                "ApImg4Ticket=true ApNonce=data SepNonce=${if (request.data("SepNonce") != null) "data" else "absent"}"
     }
 
     fun build(
         foundation: TssRequestFoundation.Parameters,
-        identity: PlistValue.Dict
-    ): BuildResult {
-        val parameters = identity.copyDeep()
-        parameters.values["ApECID"] = PlistValue.IntegerValue(foundation.ecid.toLong())
-        parameters.values["ApChipID"] = PlistValue.IntegerValue(foundation.apChipId)
-        parameters.values["ApBoardID"] = PlistValue.IntegerValue(foundation.apBoardId)
-        parameters.values["ApSecurityDomain"] = PlistValue.IntegerValue(foundation.apSecurityDomain)
-        parameters.values["ApProductionMode"] = PlistValue.BoolValue(foundation.apProductionMode)
-        parameters.values["ApSecurityMode"] = PlistValue.BoolValue(foundation.apSecurityMode)
-        parameters.values["ApSupportsImg4"] = PlistValue.BoolValue(foundation.apSupportsImg4)
-        parameters.values["ApNonce"] = PlistValue.DataValue(foundation.apNonce.copyOf())
-        foundation.apSepNonce?.let { parameters.values["ApSepNonce"] = PlistValue.DataValue(it.copyOf()) }
-
-        identity.dict("Info")?.bool("RequiresUIDMode")?.let {
-            parameters.values["RequiresUIDMode"] = PlistValue.BoolValue(it)
+        identityResult: IpswBuildIdentityReader.Result
+    ): Result {
+        require(identityResult.identityIndex == foundation.identityIndex) {
+            "BuildIdentity mismatch: foundation=${foundation.identityIndex} actual=${identityResult.identityIndex}"
         }
 
-        val request = PlistValue.Dict(linkedMapOf(
-            "@HostPlatformInfo" to PlistValue.StringValue("mac"),
-            "@VersionInfo" to PlistValue.StringValue("libauthinstall-1104.0.9"),
-            "@UUID" to PlistValue.StringValue(UUID.randomUUID().toString().uppercase(Locale.US))
-        ))
+        val identity = identityResult.identity
+        val manifest = identity.dict("Manifest")
+            ?: error("Selected BuildIdentity has no Manifest dictionary")
+        val parameters = buildParameters(foundation, identity, manifest)
 
-        copyIfPresent(request, parameters, "ApECID")
-        copyIfPresent(request, parameters, "UniqueBuildID")
-        copyIfPresent(request, parameters, "ApChipID")
-        copyIfPresent(request, parameters, "ApBoardID")
-        copyIfPresent(request, parameters, "ApSecurityDomain")
+        val request = PlistNode.Dict()
+        request.values["@HostPlatformInfo"] = PlistNode.StringValue("mac")
+        request.values["@VersionInfo"] = PlistNode.StringValue("libauthinstall-1104.0.9")
+        request.values["@UUID"] = PlistNode.StringValue(UUID.randomUUID().toString().uppercase(Locale.US))
 
-        IMG4_STRING_KEYS.forEach { copyIfPresent(request, parameters, it) }
+        addCommonTags(request, parameters)
+        val componentCount = addApTags(request, parameters, manifest)
+        addApImg4Tags(request, parameters)
+        return Result(request, componentCount, identityResult.identityIndex)
+    }
+
+    private fun buildParameters(
+        foundation: TssRequestFoundation.Parameters,
+        identity: PlistNode.Dict,
+        manifest: PlistNode.Dict
+    ): PlistNode.Dict {
+        val parameters = PlistNode.Dict()
+        copyIfPresent(parameters, identity, "UniqueBuildID")
+        IDENTITY_STRINGS.forEach { copyIfPresent(parameters, identity, it) }
+        parameters.values["ApECID"] = PlistNode.UnsignedIntegerValue(foundation.ecid)
+        parameters.values["ApChipID"] = PlistNode.IntegerValue(foundation.apChipId)
+        parameters.values["ApBoardID"] = PlistNode.IntegerValue(foundation.apBoardId)
+        parameters.values["ApSecurityDomain"] = PlistNode.IntegerValue(foundation.apSecurityDomain)
+        parameters.values["ApProductionMode"] = PlistNode.BoolValue(foundation.apProductionMode)
+        parameters.values["ApSecurityMode"] = PlistNode.BoolValue(foundation.apSecurityMode)
+        parameters.values["ApSupportsImg4"] = PlistNode.BoolValue(foundation.apSupportsImg4)
+        parameters.values["ApInRomDFU"] = PlistNode.BoolValue(true)
+        parameters.values["ApNonce"] = PlistNode.DataValue(foundation.apNonce.copyOf())
+        foundation.apSepNonce?.let { parameters.values["ApSepNonce"] = PlistNode.DataValue(it.copyOf()) }
+        parameters.values["Manifest"] = manifest.deepCopy()
+        identity.dict("Info")?.bool("RequiresUIDMode")?.let {
+            parameters.values["RequiresUIDMode"] = PlistNode.BoolValue(it)
+        }
+        return parameters
+    }
+
+    private fun addCommonTags(request: PlistNode.Dict, parameters: PlistNode.Dict) {
+        listOf("ApECID", "UniqueBuildID", "ApChipID", "ApBoardID", "ApSecurityDomain")
+            .forEach { copyIfPresent(request, parameters, it) }
+    }
+
+    private fun addApImg4Tags(request: PlistNode.Dict, parameters: PlistNode.Dict) {
+        IDENTITY_STRINGS.forEach { copyIfPresent(request, parameters, it) }
         copyRequired(request, parameters, "ApNonce")
-        request.values["@ApImg4Ticket"] = PlistValue.BoolValue(true)
+        request.values["@ApImg4Ticket"] = PlistNode.BoolValue(true)
         copyRequired(request, parameters, "ApSecurityMode")
         copyRequired(request, parameters, "ApProductionMode")
-        copyIfPresent(request, parameters, "SepNonce")
-        if (request["SepNonce"] == null) {
-            parameters["ApSepNonce"]?.let { request.values["SepNonce"] = it.copyDeepValue() }
+        val sep = parameters["SepNonce"] ?: parameters["ApSepNonce"]
+        if (sep != null) request.values["SepNonce"] = sep.deepCopy()
+        if (parameters.bool("RequiresUIDMode") == true) {
+            request.values["UID_MODE"] = PlistNode.BoolValue(false)
+            request.values["Ap,SikaFuse"] = PlistNode.IntegerValue(0)
         }
-        OPTIONAL_IMG4_KEYS.forEach { copyIfPresent(request, parameters, it) }
-        if (parameters["UID_MODE"] != null) {
-            copyIfPresent(request, parameters, "UID_MODE")
-        } else if (parameters.bool("RequiresUIDMode") == true) {
-            request.values["UID_MODE"] = PlistValue.BoolValue(false)
-        }
-        if (parameters["ApSikaFuse"] != null) {
-            request.values["Ap,SikaFuse"] = parameters["ApSikaFuse"]!!.copyDeepValue()
-        } else if (parameters.bool("RequiresUIDMode") == true) {
-            request.values["Ap,SikaFuse"] = PlistValue.IntegerValue(0)
-        }
+    }
 
-        val manifest = identity.dict("Manifest") ?: error("Selected BuildIdentity has no Manifest dictionary")
+    private fun addApTags(
+        request: PlistNode.Dict,
+        parameters: PlistNode.Dict,
+        manifest: PlistNode.Dict
+    ): Int {
         var added = 0
-        manifest.values.forEach { (name, rawEntry) ->
-            val manifestEntry = rawEntry as? PlistValue.Dict
-                ?: error("BuildManifest entry $name is not a dictionary")
-            if (name in SKIPPED_COMPONENTS) return@forEach
-            val info = manifestEntry.dict("Info") ?: return@forEach
-            val trusted = manifestEntry.bool("Trusted") == true
+        manifest.values.forEach { (name, rawNode) ->
+            if (name in AP_SKIP_COMPONENTS) return@forEach
+            val entry = rawNode as? PlistNode.Dict ?: return@forEach
+            val info = entry.dict("Info") ?: return@forEach
+            val trusted = entry.bool("Trusted") == true
             val rules = info.array("RestoreRequestRules")
-            if (foundation.apSupportsImg4 && rules == null && !trusted) return@forEach
+            if (rules == null && !trusted) return@forEach
             if (info.bool("IsFTAB") == true) return@forEach
 
-            val tssEntry = manifestEntry.copyDeep()
+            val tssEntry = entry.copy()
             tssEntry.values.remove("Info")
             if (rules != null) {
                 applyRestoreRequestRules(tssEntry, parameters, rules)
-            } else if (foundation.apSupportsImg4) {
-                tssEntry.values["EPRO"] = PlistValue.BoolValue(foundation.apProductionMode)
-                tssEntry.values["ESEC"] = PlistValue.BoolValue(foundation.apSecurityMode)
+            } else {
+                tssEntry.values["EPRO"] = PlistNode.BoolValue(parameters.bool("ApProductionMode") == true)
+                tssEntry.values["ESEC"] = PlistNode.BoolValue(parameters.bool("ApSecurityMode") == true)
             }
-            if (trusted && tssEntry["Digest"] == null) {
-                tssEntry.values["Digest"] = PlistValue.DataValue(ByteArray(0))
+            if (trusted && "Digest" !in tssEntry.values) {
+                tssEntry.values["Digest"] = PlistNode.DataValue(ByteArray(0))
             }
             if (tssEntry.values.isNotEmpty()) {
                 request.values[name] = tssEntry
                 added++
             }
         }
-
-        return BuildResult(request, added, foundation.identityIndex)
+        return added
     }
 
     private fun applyRestoreRequestRules(
-        entry: PlistValue.Dict,
-        parameters: PlistValue.Dict,
-        rules: PlistValue.ArrayValue
+        tssEntry: PlistNode.Dict,
+        parameters: PlistNode.Dict,
+        rules: PlistNode.ArrayValue
     ) {
-        rules.values.forEach { rawRule ->
-            val rule = rawRule as? PlistValue.Dict ?: return@forEach
-            val conditions = rule.dict("Conditions") ?: return@forEach
-            val matched = conditions.values.all { (key, expected) ->
-                val actual = when (key) {
-                    "ApRawProductionMode", "ApCurrentProductionMode" -> parameters["ApProductionMode"]
-                    "ApRawSecurityMode" -> parameters["ApSecurityMode"]
-                    "ApRequiresImage4" -> parameters["ApSupportsImg4"]
-                    "ApDemotionPolicyOverride" -> parameters["DemotionPolicy"]
-                    "ApInRomDFU" -> parameters["ApInRomDFU"]
-                    else -> null
+        rules.values.forEach ruleLoop@ { ruleNode ->
+            val rule = ruleNode as? PlistNode.Dict ?: return@ruleLoop
+            val conditions = rule.dict("Conditions") ?: return@ruleLoop
+            val fulfilled = conditions.values.all { (conditionName, expected) ->
+                val parameterName = when (conditionName) {
+                    "ApRawProductionMode", "ApCurrentProductionMode" -> "ApProductionMode"
+                    "ApRawSecurityMode" -> "ApSecurityMode"
+                    "ApRequiresImage4" -> "ApSupportsImg4"
+                    "ApDemotionPolicyOverride" -> "DemotionPolicy"
+                    "ApInRomDFU" -> "ApInRomDFU"
+                    else -> return@all false
                 }
-                actual != null && plistEquals(expected, actual)
+                valuesEqual(expected, parameters[parameterName])
             }
-            if (!matched) return@forEach
-            rule.dict("Actions")?.values?.forEach { (key, action) ->
-                val bool = (action as? PlistValue.BoolValue)?.value ?: return@forEach
-                entry.values[key] = PlistValue.BoolValue(bool)
+            if (!fulfilled) return@ruleLoop
+            val actions = rule.dict("Actions") ?: return@ruleLoop
+            actions.values.forEach actionLoop@ { (key, value) ->
+                val bool = value as? PlistNode.BoolValue ?: return@actionLoop
+                tssEntry.values[key] = bool.copy()
             }
         }
     }
 
-    private fun plistEquals(a: PlistValue, b: PlistValue): Boolean = when {
-        a is PlistValue.BoolValue && b is PlistValue.BoolValue -> a.value == b.value
-        a is PlistValue.IntegerValue && b is PlistValue.IntegerValue -> a.value == b.value
-        a is PlistValue.StringValue && b is PlistValue.StringValue -> a.value == b.value
-        a is PlistValue.DataValue && b is PlistValue.DataValue -> a.value.contentEquals(b.value)
-        else -> a == b
+    private fun valuesEqual(left: PlistNode, right: PlistNode?): Boolean {
+        if (right == null) return false
+        return when {
+            left is PlistNode.BoolValue && right is PlistNode.BoolValue -> left.value == right.value
+            left is PlistNode.IntegerValue && right is PlistNode.IntegerValue -> left.value == right.value
+            left is PlistNode.UnsignedIntegerValue && right is PlistNode.UnsignedIntegerValue -> left.value == right.value
+            left is PlistNode.StringValue && right is PlistNode.StringValue -> left.value == right.value
+            left is PlistNode.DataValue && right is PlistNode.DataValue -> left.value.contentEquals(right.value)
+            else -> false
+        }
     }
 
-    private fun copyRequired(target: PlistValue.Dict, source: PlistValue.Dict, key: String) {
-        target.values[key] = source[key]?.copyDeepValue() ?: error("Required TSS parameter $key is missing")
+    private fun copyRequired(target: PlistNode.Dict, source: PlistNode.Dict, key: String) {
+        val value = source[key] ?: error("Required TSS parameter missing: $key")
+        target.values[key] = value.deepCopy()
     }
 
-    private fun copyIfPresent(target: PlistValue.Dict, source: PlistValue.Dict, key: String) {
-        source[key]?.let { target.values[key] = it.copyDeepValue() }
+    private fun copyIfPresent(target: PlistNode.Dict, source: PlistNode.Dict, key: String) {
+        source[key]?.let { target.values[key] = it.deepCopy() }
     }
 
-    private val IMG4_STRING_KEYS = listOf(
-        "Ap,OSLongVersion",
-        "Ap,OSReleaseType",
-        "Ap,ProductMarketingVersion",
-        "Ap,ProductType",
-        "Ap,SDKPlatform",
-        "Ap,Target",
-        "Ap,TargetType",
-        "Ap,Timestamp"
+    private val IDENTITY_STRINGS = listOf(
+        "Ap,OSLongVersion", "Ap,OSReleaseType", "Ap,ProductMarketingVersion",
+        "Ap,ProductType", "Ap,SDKPlatform", "Ap,Target", "Ap,TargetType", "Ap,Timestamp"
     )
 
-    private val OPTIONAL_IMG4_KEYS = listOf(
-        "NeRDEpoch",
-        "PearlCertificationRootPub",
-        "AllowNeRDBoot",
-        "PermitNeRDPivot"
-    )
-
-    private val SKIPPED_COMPONENTS = setOf(
-        "BasebandFirmware",
-        "SE,UpdatePayload",
-        "BaseSystem",
-        "Diags",
-        "Ap,ExclaveOS"
+    private val AP_SKIP_COMPONENTS = setOf(
+        "BasebandFirmware", "SE,UpdatePayload", "BaseSystem", "Diags", "Ap,ExclaveOS"
     )
 }
