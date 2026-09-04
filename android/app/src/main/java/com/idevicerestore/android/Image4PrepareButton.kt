@@ -14,9 +14,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Hidden automatic coordinator for extracting, personalizing, and validating iBSS.
  *
- * Once a selected firmware is ready and a matching in-memory TSS ticket exists, this component
- * automatically re-verifies the build, resolves the same BuildIdentity, extracts raw iBSS,
- * creates and validates the IMG4 wrapper, then stops before any DFU upload is constructed.
+ * This stage consumes the exact freshly verified firmware/preflight context published by the TSS
+ * stage, avoiding duplicate catalog verification and BuildManifest parsing. It performs no USB I/O
+ * and stops before any DFU upload session is constructed.
  */
 class Image4PrepareButton @JvmOverloads constructor(
     context: Context,
@@ -57,8 +57,9 @@ class Image4PrepareButton @JvmOverloads constructor(
         val firmwareStatus = activity.findViewById<TextView?>(R.id.firmwareStatus)?.text?.toString().orEmpty()
         if (!firmwareStatus.startsWith("Ready")) return
         val ticket = TssTicketStore.get() ?: return
-        if (ticket.buildId != buildId) return
-        val key = "$buildId:${ticket.identityIndex}:${ticket.obtainedAtMillis}"
+        val context = FirmwarePreparationStore.get() ?: return
+        if (!context.matches(buildId, ticket.identityIndex)) return
+        val key = "$buildId:${ticket.identityIndex}:${ticket.obtainedAtMillis}:${context.preparedAtMillis}"
         if (completedKey == key) return
         prepareIbssAutomatically(key)
     }
@@ -68,54 +69,39 @@ class Image4PrepareButton @JvmOverloads constructor(
         if (!inFlight.compareAndSet(false, true)) return
         setOperation(activity, "Preparing personalized iBSS…", true)
         log(activity, "Image4 preparation: automatic firmware-preparation stage started")
+        log(activity, "Image4 preparation: reusing cached verified firmware/preflight context")
         log(activity, "Image4 preparation: no USB command will be sent")
 
         worker.execute {
             try {
                 val ticket = TssTicketStore.get() ?: error("No TSS ticket is available in this app session")
+                val context = FirmwarePreparationStore.get() ?: error("No verified firmware preparation context is available")
                 val buildId = selectedBuildId(activity)
                     ?: error("Selected firmware build could not be determined from the current UI")
-                require(ticket.buildId == buildId) {
+                require(ticket.buildId.equals(buildId, ignoreCase = true)) {
                     "TSS ticket build ${ticket.buildId} does not match selected build $buildId"
                 }
-
-                val identifier = selectedIdentifier(activity)
-                    ?: error("Identified device could not be determined from the current UI")
-                log(activity, "Image4 preparation: device=$identifier build=$buildId identity=${ticket.identityIndex}")
-                log(activity, "Image4 preparation: freshly reverifying selected build")
-
-                val stableCatalog = FirmwareCatalog(logger = { log(activity, it) })
-                var firmware = stableCatalog.reverifySigned(identifier, buildId)
-                if (firmware == null) {
-                    firmware = BetaFirmwareCatalog(logger = { log(activity, it) })
-                        .reverifySigned(identifier, buildId)
+                require(context.matches(buildId, ticket.identityIndex)) {
+                    "Cached preparation context does not match selected build/TSS identity"
                 }
-                firmware ?: error("Selected build $buildId is not currently signed or its Apple payload could not be verified")
 
-                val storage = FirmwareStorage(activity, logger = { log(activity, it) })
-                val location = storage.locationFor(firmware)
+                val firmware = context.firmware
+                val location = context.location
                 val ipsw = location.file
+                val preflight = context.preflight
                 require(ipsw.isFile) { "Selected IPSW is not present: ${ipsw.absolutePath}" }
                 require(firmware.fileSize <= 0L || ipsw.length() == firmware.fileSize) {
                     "Selected IPSW size mismatch: expected=${firmware.fileSize} actual=${ipsw.length()}"
                 }
-
-                val catalogDevice = stableCatalog.listDevices()
-                    .firstOrNull { it.identifier.equals(identifier, ignoreCase = true) }
-                    ?: error("No device metadata found for $identifier")
-                val preflight = IpswPreflight(logger = { log(activity, it) }).inspect(
-                    IpswPreflight.Request(
-                        ipsw = ipsw,
-                        identifier = identifier,
-                        boardConfig = catalogDevice.boardConfig,
-                        chipId = catalogDevice.cpid,
-                        boardId = catalogDevice.bdid
-                    )
-                )
                 require(preflight.identityIndex == ticket.identityIndex) {
-                    "Current BuildIdentity ${preflight.identityIndex} does not match TSS identity ${ticket.identityIndex}"
+                    "Cached BuildIdentity ${preflight.identityIndex} does not match TSS identity ${ticket.identityIndex}"
                 }
-                log(activity, "Image4 preparation: preflight READY identity=${preflight.identityIndex} board=${preflight.boardConfig ?: "unknown"}")
+
+                log(
+                    activity,
+                    "Image4 preparation: cached context READY device=${context.identifier} build=$buildId " +
+                        "identity=${preflight.identityIndex} board=${preflight.boardConfig ?: "unknown"}"
+                )
 
                 val componentsDir = File(location.buildDirectory, "Components")
                 val personalizedDir = File(location.buildDirectory, "Personalized")
@@ -143,7 +129,7 @@ class Image4PrepareButton @JvmOverloads constructor(
                 )
                 log(activity, "Image4 preparation: output=${personalized.file.absolutePath}")
                 log(activity, "Image4 preparation: STOPPED before DFU upload")
-                setOperation(activity, "Firmware preparation ready — restore upload has not started", false)
+                setOperation(activity, "Firmware preparation ready — Start Restore is available", false)
             } catch (t: Throwable) {
                 Image4PreparationStore.clear()
                 log(activity, "Image4 preparation FAILED: ${t.javaClass.simpleName}: ${t.message}")
@@ -158,12 +144,6 @@ class Image4PrepareButton @JvmOverloads constructor(
         val title = activity.findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
         return Regex("\\(([0-9]{2}[A-Za-z][A-Za-z0-9]{3,12})\\)\\s*$")
             .find(title)?.groupValues?.getOrNull(1)
-    }
-
-    private fun selectedIdentifier(activity: AppCompatActivity): String? {
-        val status = activity.findViewById<TextView?>(R.id.status)?.text?.toString().orEmpty()
-        return Regex("\\(([A-Za-z0-9,._-]+)\\)")
-            .find(status)?.groupValues?.getOrNull(1)
     }
 
     private fun setOperation(activity: AppCompatActivity, message: String, busy: Boolean) {
