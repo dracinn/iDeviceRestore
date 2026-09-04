@@ -3,6 +3,7 @@ package com.idevicerestore.android
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 
 /** HTTPS transport for Apple TSS. This is never invoked by automatic USB probing. */
 class TssHttpTransport(
@@ -26,7 +27,15 @@ class TssHttpTransport(
         require(body.isNotEmpty()) { "TSS request body is empty" }
         logger("TSS: POST Apple signing request bytes=${body.size} identity=${request.identityIndex}")
 
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+        val url = URL(endpoint)
+        require(url.protocol.equals("https", ignoreCase = true)) { "TSS endpoint must use HTTPS" }
+        require(url.host.equals("gs.apple.com", ignoreCase = true)) { "Unexpected TSS host: ${url.host}" }
+
+        val tls = AppleTssTls.create()
+        logger("TSS TLS: using Apple Root CA trust anchor sha256=${tls.rootSha256.take(16)}…")
+
+        val connection = (url.openConnection() as HttpsURLConnection).apply {
+            sslSocketFactory = tls.sslContext.socketFactory
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
