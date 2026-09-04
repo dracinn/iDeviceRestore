@@ -18,6 +18,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity
+            android:name=".BootDiagnosticsActivity"
+            android:exported="true"
+            android:label="iDeviceRestore Boot Diagnostics">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
