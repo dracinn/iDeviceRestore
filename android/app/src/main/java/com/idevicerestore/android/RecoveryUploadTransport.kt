@@ -33,8 +33,6 @@ class RecoveryUploadTransport(
         val endpointAddress: Int
     )
 
-    @Volatile private var uploadInitResult: Int? = null
-
     init {
         require(bulkOut.direction == UsbConstants.USB_DIR_OUT) {
             "Recovery upload endpoint must be OUT"
@@ -48,19 +46,16 @@ class RecoveryUploadTransport(
         }
     }
 
-    /** Issues only libirecovery's Recovery upload initialization request; no bulk bytes are sent. */
-    fun initializeUpload(): Int {
-        uploadInitResult?.let { return it }
-        return connection.controlTransfer(
-            LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
-            LIBIRECOVERY_UPLOAD_INIT_REQUEST,
-            0,
-            0,
-            null,
-            0,
-            USB_TIMEOUT_MS
-        ).also { uploadInitResult = it }
-    }
+    /** Issues one libirecovery Recovery upload initialization request; no bulk bytes are sent. */
+    fun initializeUpload(): Int = connection.controlTransfer(
+        LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
+        LIBIRECOVERY_UPLOAD_INIT_REQUEST,
+        0,
+        0,
+        null,
+        0,
+        USB_TIMEOUT_MS
+    )
 
     /** Uploads an in-memory component using libirecovery's 0x8000-byte Recovery packet size. */
     fun sendBuffer(
@@ -71,7 +66,7 @@ class RecoveryUploadTransport(
     /**
      * Streams exactly [length] bytes to iBoot over Recovery bulk endpoint 0x04.
      *
-     * Upstream libirecovery primes the Recovery upload path with a zero-length 0x41/0 control-OUT
+     * Upstream libirecovery primes each Recovery upload with a zero-length 0x41/0 control-OUT
      * request before sending any bulk data, then uses 0x8000-byte packets and treats a short USB
      * write as an upload failure. This method follows that sequence while allowing large components
      * to be streamed without loading the entire image into memory.
