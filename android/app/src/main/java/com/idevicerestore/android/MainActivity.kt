@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     val device = intent.usbDevice()
                     log("USB device detached: ${device?.deviceName ?: "unknown"}")
+                    RestorePreflightEvidenceStore.observeDisconnected(device?.deviceName)?.let { log(it.summary()) }
                     if (device != null && device.deviceName == lastAutoProbeDeviceName) {
                         lastAutoProbeDeviceName = null
                         identifiedDevice = null
@@ -217,6 +218,7 @@ class MainActivity : AppCompatActivity() {
         val preferred = apple.firstOrNull { AppleUsb.personality(it) != AppleUsb.Personality.APPLE_OTHER } ?: apple.firstOrNull()
         selected = preferred
         if (preferred == null) {
+            RestorePreflightEvidenceStore.observeDisconnected()?.let { log(it.summary()) }
             lastAutoProbeDeviceName = null
             identifiedDevice = null
             clearFirmwareSelection("no Apple USB device", logChange = false)
@@ -229,6 +231,10 @@ class MainActivity : AppCompatActivity() {
             binding.probeButton.isEnabled = false
             updateFirmwareUi()
             return
+        }
+        RestorePreflightEvidenceStore.observeUsb(preferred)?.let { log(it.summary()) }
+        if (AppleUsb.personality(preferred) != AppleUsb.Personality.RECOVERY) {
+            RestorePreflightEvidenceStore.clearRecovery()
         }
         showSelected(preferred)
         if (!usbManager.hasPermission(preferred)) {
@@ -291,6 +297,8 @@ class MainActivity : AppCompatActivity() {
         binding.probeButton.isEnabled = false
         val source = if (manual) "manual" else "automatic"
         val personality = AppleUsb.personality(device)
+        RestorePreflightEvidenceStore.observeUsb(device)
+        if (personality != AppleUsb.Personality.RECOVERY) RestorePreflightEvidenceStore.clearRecovery()
         probeLog(
             "Probe requested ($source): personality=$personality mode=${AppleUsb.mode(device)} " +
                 "VID=%04x PID=%04x".format(device.vendorId, device.productId)
@@ -365,6 +373,12 @@ class MainActivity : AppCompatActivity() {
                     AppleUsb.Mode.RECOVERY, AppleUsb.Mode.WTF -> {
                         val recovery = RecoveryTransport(connection, claimed.bulkIn)
                         val snapshot = RecoveryDiagnosticSession(device, connection, recovery).snapshot()
+                        if (snapshot.readiness.recoveryMode) {
+                            RestorePreflightEvidenceStore.recordRecovery(device, snapshot.readiness)
+                        } else {
+                            RestorePreflightEvidenceStore.clearRecovery()
+                        }
+                        logUi(RestorePreflightEvidenceStore.preflightSummary())
                         snapshot.variables.forEach { variable ->
                             logUi("Recovery getenv probe: ${variable.name}")
                             val result = variable.result
@@ -889,6 +903,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareLogs() {
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
+        val preflight = RestorePreflightEvidenceStore.snapshot()
         val report = buildString {
             appendLine("iDeviceRestore verbose diagnostic log")
             appendLine("Generated: $timestamp")
@@ -900,6 +915,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
             appendLine("Firmware selection mode: manual catalog chooser")
             appendLine("Firmware metadata mode: persistent cache + current index refresh + selection reverify")
+            appendLine(RestorePreflightEvidenceStore.preflightSummary())
             identifiedDevice?.let { appendLine("Identified device: ${it.name} (${it.identifier})") }
             latestSignedFirmware?.let { appendLine("Selected freshly verified firmware: ${it.version} (${it.buildId})") }
             firmwareWorkspace?.let { appendLine("Firmware directory: ${it.firmware.absolutePath}") }
@@ -911,6 +927,9 @@ class MainActivity : AppCompatActivity() {
             appendLine("Firmware download active: $firmwareDownloadActive")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared logs")
             appendLine("---")
+            appendLine("=== USB Preflight Timeline ===")
+            if (preflight.usbEvents.isEmpty()) appendLine("No USB preflight observations")
+            else preflight.usbEvents.forEach { appendLine("${it.timestamp} ${it.summary()}") }
             appendLine("=== Activity Log ===")
             append(logBuffer.toString())
             if (logBuffer.isNotEmpty() && logBuffer.last() != '\n') appendLine()
