@@ -63,11 +63,13 @@ class RecoveryDiagnosticSession(
             consoleError = it
         }
 
+        val readiness = buildReadiness(results)
+        RestorePreflightEvidenceStore.recordRecovery(device, readiness)
         return Snapshot(
             variables = results,
             console = consoleResult,
             consoleError = consoleError,
-            readiness = buildReadiness(results)
+            readiness = readiness
         )
     }
 
