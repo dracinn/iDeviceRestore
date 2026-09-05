@@ -5,6 +5,8 @@ import android.hardware.usb.UsbEndpoint
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * iBoot/recovery USB transport modeled after libirecovery.
@@ -12,6 +14,10 @@ import java.nio.charset.StandardCharsets
  * This class intentionally keeps transport primitives separate from restore policy. Safe command
  * and read helpers live here; higher-level code decides when potentially state-changing commands
  * such as `go`, `reset`, image execution, or environment mutation are appropriate.
+ *
+ * Android can open more than one UsbDeviceConnection for the same Recovery device. iBoot exposes a
+ * single command/response channel, so command traffic must be serialized across transport instances
+ * or one caller can consume another caller's control-IN response.
  */
 class RecoveryTransport(
     private val connection: UsbDeviceConnection,
@@ -45,7 +51,9 @@ class RecoveryTransport(
     )
 
     /** Mirrors libirecovery's standard irecv_send_command() vendor control-OUT transport. */
-    fun sendCommand(command: String): Int = sendCommandInternal(command, IRECV_DEFAULT_COMMAND_REQUEST)
+    fun sendCommand(command: String): Int = COMMAND_CHANNEL_LOCK.withLock {
+        sendCommandInternal(command, IRECV_DEFAULT_COMMAND_REQUEST)
+    }
 
     /**
      * Mirrors libirecovery's irecv_send_command_breq().
@@ -53,9 +61,9 @@ class RecoveryTransport(
      * Apple Silicon restore flows use this for special iBoot commands (notably the M1 iBEC `go`
      * transition with bRequest=1). This primitive does not choose commands on its own.
      */
-    fun sendCommandBreq(command: String, request: Int): Int {
+    fun sendCommandBreq(command: String, request: Int): Int = COMMAND_CHANNEL_LOCK.withLock {
         require(request in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
-        return sendCommandInternal(command, request)
+        sendCommandInternal(command, request)
     }
 
     private fun sendCommandInternal(command: String, request: Int): Int {
@@ -84,7 +92,12 @@ class RecoveryTransport(
     }
 
     /** Reads the vendor control-IN response used by iBoot command helpers such as getenv. */
-    fun readControlResponse(request: Int = IRECV_DEFAULT_COMMAND_REQUEST, maxBytes: Int = 255): ByteArray {
+    fun readControlResponse(request: Int = IRECV_DEFAULT_COMMAND_REQUEST, maxBytes: Int = 255): ByteArray =
+        COMMAND_CHANNEL_LOCK.withLock {
+            readControlResponseInternal(request, maxBytes)
+        }
+
+    private fun readControlResponseInternal(request: Int, maxBytes: Int): ByteArray {
         require(request in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
         require(maxBytes in 1..0xFFFF) { "maxBytes must be between 1 and 65535" }
         val response = ByteArray(maxBytes)
@@ -101,16 +114,23 @@ class RecoveryTransport(
         return response.copyOf(received)
     }
 
-    /** Performs one vendor control-OUT command followed by its vendor control-IN response. */
+    /**
+     * Performs one vendor control-OUT command followed by its vendor control-IN response.
+     *
+     * The shared lock deliberately spans both transfers. Locking only the OUT and IN calls
+     * independently would still allow another RecoveryTransport instance to insert a command
+     * between them and steal the response.
+     */
     fun exchangeCommand(
         command: String,
         outRequest: Int = IRECV_DEFAULT_COMMAND_REQUEST,
         inRequest: Int = IRECV_DEFAULT_COMMAND_REQUEST,
         maxResponseBytes: Int = 255
-    ): CommandResponse {
-        val commandBytes = sendCommandBreq(command, outRequest)
-        val response = readControlResponse(inRequest, maxResponseBytes)
-        return CommandResponse(commandBytes, response.size, response)
+    ): CommandResponse = COMMAND_CHANNEL_LOCK.withLock {
+        require(outRequest in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
+        val commandBytes = sendCommandInternal(command, outRequest)
+        val response = readControlResponseInternal(inRequest, maxResponseBytes)
+        CommandResponse(commandBytes, response.size, response)
     }
 
     /**
@@ -190,6 +210,9 @@ class RecoveryTransport(
 
     companion object {
         const val APPLE_SILICON_GO_BREQUEST = 1
+
+        /** One iBoot command/response stream is shared by all Android connections to Recovery USB. */
+        private val COMMAND_CHANNEL_LOCK = ReentrantLock(true)
 
         private const val IRECV_DEFAULT_COMMAND_REQUEST = 0
         private const val RECOVERY_REQUEST_TYPE_OUT = 0x40
