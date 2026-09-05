@@ -5,7 +5,13 @@
 ![](https://github.com/libimobiledevice/idevicerestore/actions/workflows/build.yml/badge.svg)
 
 ## Table of Contents
+- [About this fork](#about-this-fork)
 - [Features](#features)
+- [Building the Android app](#building-the-android-app)
+  - [Linux PC](#linux-pc)
+  - [macOS](#macos-android-build)
+  - [Windows PC](#windows-pc)
+  - [Build output](#build-output)
 - [Building](#building)
   - [Prerequisites](#prerequisites)
     - [Linux (Debian/Ubuntu based)](#linux-debianubuntu-based)
@@ -18,6 +24,27 @@
 - [Links](#links)
 - [License](#license)
 - [Credits](#credits)
+
+## About this fork
+
+This repository is the **iDeviceRestore** fork maintained at
+[dracinn/iDeviceRestore](https://github.com/dracinn/iDeviceRestore). It keeps the
+upstream `libimobiledevice/idevicerestore` command-line source while developing
+an Android application that can communicate directly with Apple devices over
+Android USB Host/OTG.
+
+Android is currently the active development target for the fork. Work in the
+`android/` tree includes DFU and Recovery/iBoot probing, on-device diagnostic
+logging, firmware catalog discovery, signed-firmware filtering, and verified,
+resumable IPSW downloads. The longer-term goal is to bring the complete
+idevicerestore restore flow to Android without requiring a desktop computer.
+
+For Android-specific architecture, current functionality, release workflow,
+physical testing notes, and the development roadmap, see
+[`android/README.md`](android/README.md).
+
+The original upstream project is maintained by the libimobiledevice project at
+[libimobiledevice/idevicerestore](https://github.com/libimobiledevice/idevicerestore).
 
 ## Features
 
@@ -48,7 +75,110 @@ Use with caution and make sure to backup your data before trying to restore.
 
 **In any case, usage is at your own risk.**
 
+## Building the Android app
+
+The Android application lives in `android/` and currently targets Android API
+35 with a minimum supported API level of 26. Building requires a Java 17 JDK,
+the Android SDK, and an Android build environment capable of using Android
+Gradle Plugin 8.7.3 and Kotlin 2.1.0.
+
+The repository currently does not include a Gradle wrapper. Android Studio is
+therefore the recommended build environment on all desktop platforms because it
+can manage the compatible Gradle runtime and Android SDK components for you.
+
+Clone this fork before following the platform-specific instructions:
+
+```shell
+git clone https://github.com/dracinn/iDeviceRestore.git
+cd iDeviceRestore
+```
+
+### Linux PC
+
+1. Install Git and a Java 17 JDK. On Debian/Ubuntu based systems:
+   ```shell
+   sudo apt update
+   sudo apt install git openjdk-17-jdk
+   ```
+2. Install the current stable Android Studio for Linux and complete its first-run
+   Android SDK setup.
+3. In Android Studio, choose **Open** and select the repository's `android/`
+   directory.
+4. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+5. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+If you already have a compatible standalone Gradle installation and Android SDK
+configured, you can build from a terminal instead:
+
+```shell
+cd android
+gradle :app:assembleDebug
+```
+
+### macOS (Android build)
+
+1. Install the Xcode command-line tools if Git is not already available:
+   ```shell
+   xcode-select --install
+   ```
+2. Install a Java 17 JDK, for example with Homebrew:
+   ```shell
+   brew install openjdk@17
+   ```
+3. Install the current stable Android Studio for macOS and complete its first-run
+   Android SDK setup.
+4. Open the repository's `android/` directory in Android Studio.
+5. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+6. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+With a compatible standalone Gradle installation and Android SDK configured,
+the command-line build is:
+
+```shell
+cd android
+gradle :app:assembleDebug
+```
+
+### Windows PC
+
+1. Install Git for Windows.
+2. Install a Java 17 JDK and make sure `JAVA_HOME` points to it.
+3. Install the current stable Android Studio for Windows and complete its
+   first-run Android SDK setup.
+4. Open the repository's `android` directory in Android Studio.
+5. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+6. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+With a compatible standalone Gradle installation and Android SDK configured,
+PowerShell or Command Prompt can build the app with:
+
+```powershell
+cd android
+gradle :app:assembleDebug
+```
+
+### Build output
+
+A successful debug build produces the APK at:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+For release builds, use the repository's GitHub Actions release workflow and the
+signing setup documented in [`android/README.md`](android/README.md). Android
+updates must continue to use the same release signing key.
+
 ## Building
+
+The following section documents the upstream command-line `idevicerestore`
+build. It remains applicable to the desktop C source retained by this fork.
 
 ### Prerequisites
 
@@ -170,8 +300,8 @@ Before we can build it, the source tree has to be configured for building. The s
 
   If you haven't done already, clone the actual project repository and change into the directory.
   ```shell
-  git clone https://github.com/libimobiledevice/idevicerestore.git
-  cd idevicerestore
+  git clone https://github.com/dracinn/iDeviceRestore.git
+  cd iDeviceRestore
   ```
 
   Configure the source tree for building:
@@ -311,10 +441,12 @@ Please make sure your contribution adheres to:
 
 ## Links
 
-* Homepage: https://libimobiledevice.org/
-* Repository: https://github.com/libimobiledevice/idevicerestore.git
-* Repository (Mirror): https://git.libimobiledevice.org/idevicerestore.git
-* Issue Tracker: https://github.com/libimobiledevice/idevicerestore/issues
+* Fork Repository: https://github.com/dracinn/iDeviceRestore.git
+* Android App Documentation: https://github.com/dracinn/iDeviceRestore/blob/master/android/README.md
+* Upstream Homepage: https://libimobiledevice.org/
+* Upstream Repository: https://github.com/libimobiledevice/idevicerestore.git
+* Upstream Repository (Mirror): https://git.libimobiledevice.org/idevicerestore.git
+* Upstream Issue Tracker: https://github.com/libimobiledevice/idevicerestore/issues
 * Mailing List: https://lists.libimobiledevice.org/mailman/listinfo/libimobiledevice-devel
 * Twitter: https://twitter.com/libimobiledev
 
@@ -331,4 +463,4 @@ iPadOS, tvOS, watchOS, and macOS are trademarks of Apple Inc.
 This project is an independent software application and has not been
 authorized, sponsored, or otherwise approved by Apple Inc.
 
-README Updated on: 2025-09-11
+README Updated on: 2026-09-05
