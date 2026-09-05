@@ -21,14 +21,12 @@
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity
             android:name=".BootDiagnosticsActivity"
+            android:exported="false"
+            android:label="iDeviceRestore Boot Diagnostics" />
+        <activity
+            android:name=".MainActivity"
             android:exported="true"
-            android:label="iDeviceRestore Boot Diagnostics">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".MainActivity" android:exported="true">
+            android:label="iDeviceRestore Lab">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -40,5 +38,15 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+        <activity-alias
+            android:name=".BootDiagnosticsLauncher"
+            android:exported="true"
+            android:label="iDeviceRestore Boot Diagnostics"
+            android:targetActivity=".BootDiagnosticsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>
