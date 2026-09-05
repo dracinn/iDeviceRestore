@@ -23,6 +23,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private lateinit var engine: BootDiagnosticEngine
     private lateinit var stateView: TextView
     private lateinit var deviceView: TextView
+    private lateinit var recoveryView: TextView
     private lateinit var findingsView: TextView
     private lateinit var timelineView: TextView
     private lateinit var logPathView: TextView
@@ -35,14 +36,20 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     val device = intent.usbDevice()
-                    engine.recordAttach(device?.deviceName)
-                    runDiagnostic(requestPermission = true)
+                    if (device != null && !usbManager.hasPermission(device)) {
+                        worker.execute { engine.recordAttach(device.deviceName) }
+                        requestUsbPermission(device)
+                        stateView.text = "USB permission required"
+                        deviceView.text = AppleUsb.describe(device)
+                    } else {
+                        queueScan { engine.recordAttach(device?.deviceName) }
+                    }
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    engine.recordDetach(intent.usbDevice()?.deviceName)
-                    runDiagnostic(requestPermission = false)
+                    val deviceName = intent.usbDevice()?.deviceName
+                    queueScan { engine.recordDetach(deviceName) }
                 }
-                permissionAction -> runDiagnostic(requestPermission = false)
+                permissionAction -> queueScan()
             }
         }
     }
@@ -100,6 +107,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
         stateView = section(root, "Current state", "Waiting for scan", 20f)
         deviceView = section(root, "Detected device", "No Apple USB device", 14f)
+        recoveryView = section(root, "Recovery details", "No Recovery snapshot yet", 13f, monospace = true)
 
         runButton = Button(this).apply {
             text = "Run diagnostic scan"
@@ -153,10 +161,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
                 return
             }
         }
+        queueScan()
+    }
 
+    private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
         stateView.text = "Scanning…"
         worker.execute {
+            beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
                 logger.log("Diagnostic scan failed: ${error.message ?: error.javaClass.simpleName}")
                 BootDiagnosticSnapshot(
@@ -182,6 +194,20 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private fun render(snapshot: BootDiagnosticSnapshot) {
         stateView.text = snapshot.state.name.replace('_', ' ')
         deviceView.text = snapshot.deviceDescription ?: "No Apple USB device detected"
+        recoveryView.text = snapshot.recovery?.let { recovery ->
+            buildString {
+                appendLine("commandTransportReady=${recovery.readiness.commandTransportReady}")
+                appendLine("buildVersion=${recovery.readiness.buildVersion ?: "unknown"}")
+                appendLine("buildStyle=${recovery.readiness.buildStyle ?: "unknown"}")
+                appendLine("autoBoot=${recovery.readiness.autoBoot ?: "unknown"}")
+                appendLine("bootStage=${recovery.readiness.bootStage ?: "unknown"}")
+                recovery.variables.forEach { variable ->
+                    append("${variable.name}=")
+                    appendLine(variable.result?.value ?: variable.error?.message ?: "no response")
+                }
+                append("consoleBytes=${recovery.console?.bytes ?: 0}")
+            }
+        } ?: "No Recovery snapshot yet"
         findingsView.text = if (snapshot.findings.isEmpty()) {
             "No conclusive finding yet. Connect the affected Mac in its current boot state and scan again."
         } else {
