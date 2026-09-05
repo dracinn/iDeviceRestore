@@ -34,14 +34,22 @@ object RestorePreflightEvidenceStore {
     fun observeUsb(device: UsbDevice): UsbStateTracker.Event? = usbTracker.observe(device)
 
     @Synchronized
-    fun observeDisconnected(deviceName: String? = null): UsbStateTracker.Event? = usbTracker.disconnected(deviceName)
+    fun observeDisconnected(deviceName: String? = null): UsbStateTracker.Event? {
+        recoveryEvidence = null
+        return usbTracker.disconnected(deviceName)
+    }
 
+    @Synchronized
     fun recordRecovery(device: UsbDevice, readiness: RecoveryDiagnosticSession.Readiness) {
+        if (!readiness.recoveryMode) {
+            recoveryEvidence = null
+            return
+        }
         recoveryEvidence = RecoveryEvidence(
             observedAt = Instant.now(),
             deviceName = device.deviceName,
             commandTransportReady = readiness.commandTransportReady,
-            recoveryMode = readiness.recoveryMode,
+            recoveryMode = true,
             buildVersion = readiness.buildVersion,
             buildStyle = readiness.buildStyle,
             autoBoot = readiness.autoBoot,
@@ -50,10 +58,12 @@ object RestorePreflightEvidenceStore {
         )
     }
 
+    @Synchronized
     fun clearRecovery() {
         recoveryEvidence = null
     }
 
+    @Synchronized
     fun snapshot(): Snapshot = Snapshot(
         usbEvents = usbTracker.snapshot(),
         recovery = recoveryEvidence
@@ -66,7 +76,7 @@ object RestorePreflightEvidenceStore {
         return buildString {
             append("Preflight USB=").append(current?.state ?: "unknown")
             current?.previousStateDurationMs?.let { append(" transitionMs=").append(it) }
-            if (recovery != null) {
+            if (current?.state == UsbStateTracker.State.RECOVERY && recovery != null) {
                 append(" recoveryTransport=").append(if (recovery.commandTransportReady) "ready" else "not-confirmed")
                 append(" bootStage=").append(recovery.bootStage ?: "unknown")
                 append(" build=").append(recovery.buildVersion ?: "unknown")
