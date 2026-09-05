@@ -2,6 +2,8 @@ package com.idevicerestore.android
 
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import java.time.Duration
+import java.time.Instant
 import java.util.ArrayDeque
 
 class BootDiagnosticEngine(
@@ -22,8 +24,10 @@ class BootDiagnosticEngine(
 
         val device = apple.firstOrNull { AppleUsb.mode(it) != AppleUsb.Mode.APPLE_OTHER } ?: apple.first()
         val mode = AppleUsb.mode(device)
+        logger.organizeForDevice(device)
         logger.logUsb(AppleUsb.describe(device))
         logger.logUsb(AppleUsb.interfaceSummary(device).trim())
+        logger.logUsb(AppleUsb.bootIdentifierSummary(device))
 
         if (lastDeviceName != null && lastDeviceName != device.deviceName) {
             record(BootDiagnosticState.APPLE_DEVICE, "USB device identity changed from $lastDeviceName to ${device.deviceName}")
@@ -42,12 +46,12 @@ class BootDiagnosticEngine(
                 snapshot(BootDiagnosticState.DFU, device)
             }
             AppleUsb.Mode.WTF -> {
-                record(BootDiagnosticState.DFU, "Device is enumerated in WTF/pre-DFU mode")
-                snapshot(BootDiagnosticState.DFU, device)
+                record(BootDiagnosticState.WTF, "Device is enumerated in WTF/pre-DFU mode")
+                snapshot(BootDiagnosticState.WTF, device)
             }
             AppleUsb.Mode.RECOVERY -> probeRecovery(device)
             AppleUsb.Mode.APPLE_OTHER -> {
-                record(BootDiagnosticState.NORMAL_OR_OTHER, "Apple USB device is present outside known DFU/Recovery PIDs")
+                record(BootDiagnosticState.NORMAL_OR_OTHER, "Apple USB device is present outside known DFU/Recovery/WTF PIDs")
                 snapshot(BootDiagnosticState.NORMAL_OR_OTHER, device)
             }
         }
@@ -137,6 +141,12 @@ class BootDiagnosticEngine(
                 detail = "The device is currently exposing Apple's DFU USB interface. macOS and recoveryOS are not running in this state.",
                 recommendation = "Use a revive/restore workflow only after preserving any data-recovery considerations."
             )
+            BootDiagnosticState.WTF -> findings += BootDiagnosticFinding(
+                title = "Device is in WTF/pre-DFU mode",
+                confidence = DiagnosticConfidence.CONFIRMED,
+                detail = "The observed USB PID is Apple's WTF/pre-DFU mode, which is distinct from DFU and indicates an earlier boot/recovery stage.",
+                recommendation = "Capture the next USB transition before issuing restore commands; progression to DFU or Recovery is diagnostically significant."
+            )
             BootDiagnosticState.RECOVERY_RESPONSIVE -> findings += BootDiagnosticFinding(
                 title = "Recovery/iBoot communication is functional",
                 confidence = DiagnosticConfidence.CONFIRMED,
@@ -150,9 +160,9 @@ class BootDiagnosticEngine(
                 recommendation = "Retry with a direct USB connection/cable, then compare repeated sessions before treating this as a device-side firmware failure."
             )
             BootDiagnosticState.NORMAL_OR_OTHER -> findings += BootDiagnosticFinding(
-                title = "Device is outside known DFU/Recovery modes",
+                title = "Device is outside known DFU/Recovery/WTF modes",
                 confidence = DiagnosticConfidence.INSUFFICIENT_EVIDENCE,
-                detail = "An Apple USB device is present, but its PID is not one of the DFU/Recovery identifiers currently classified by iDeviceRestore."
+                detail = "An Apple USB device is present, but its PID is not one of the boot-mode identifiers currently classified by iDeviceRestore."
             )
             else -> Unit
         }
@@ -160,12 +170,12 @@ class BootDiagnosticEngine(
         val modes = recentModes.toList()
         if (modes.size >= 4) {
             val recoveryCount = modes.count { it == AppleUsb.Mode.RECOVERY }
-            val dfuCount = modes.count { it == AppleUsb.Mode.DFU || it == AppleUsb.Mode.WTF }
-            if (recoveryCount >= 2 && dfuCount >= 2) {
+            val earlyCount = modes.count { it == AppleUsb.Mode.DFU || it == AppleUsb.Mode.WTF }
+            if (recoveryCount >= 2 && earlyCount >= 2) {
                 findings += BootDiagnosticFinding(
                     title = "Repeated early-boot mode cycling detected",
                     confidence = DiagnosticConfidence.PROBABLE,
-                    detail = "Recent observations alternate between DFU/pre-DFU and Recovery, which can indicate failure to progress through the early boot chain.",
+                    detail = "Recent observations alternate between Recovery and DFU/WTF states, which can indicate failure to progress through the early boot chain.",
                     recommendation = "Capture another session without changing cables or issuing restore commands so the transition pattern can be confirmed."
                 )
             }
@@ -181,8 +191,15 @@ class BootDiagnosticEngine(
 
     private fun record(state: BootDiagnosticState, message: String) {
         val last = events.lastOrNull()
-        if (last?.state == state && last.message == message) return
-        val event = BootDiagnosticEvent(state = state, message = message)
+        if (last?.state == state && last.message.substringBefore(" after ") == message) return
+        val now = Instant.now()
+        val timedMessage = if (last != null && last.state != state) {
+            val millis = Duration.between(last.timestamp, now).toMillis().coerceAtLeast(0)
+            "$message after %.3f s in ${last.state}".format(Locale.US, millis / 1000.0)
+        } else {
+            message
+        }
+        val event = BootDiagnosticEvent(timestamp = now, state = state, message = timedMessage)
         events += event
         logger.log("${event.state}: ${event.message}")
     }
