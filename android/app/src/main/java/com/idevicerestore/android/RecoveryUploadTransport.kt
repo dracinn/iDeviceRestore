@@ -67,9 +67,8 @@ class RecoveryUploadTransport(
      * Streams exactly [length] bytes to iBoot over Recovery bulk endpoint 0x04.
      *
      * Upstream libirecovery primes each Recovery upload with a zero-length 0x41/0 control-OUT
-     * request before sending any bulk data, then uses 0x8000-byte packets and treats a short USB
-     * write as an upload failure. This method follows that sequence while allowing large components
-     * to be streamed without loading the entire image into memory.
+     * request and immediately sends 0x8000-byte bulk packets on that same open USB connection.
+     * A failed initialization is fatal and never authorizes a later connection to bypass it.
      */
     fun sendStream(
         input: InputStream,
@@ -95,21 +94,6 @@ class RecoveryUploadTransport(
             )
         }
         return sendBulkStream(input, length, "initResult=$initResult", onProgress)
-    }
-
-    /**
-     * Sends bulk data without issuing 0x41/0 again.
-     *
-     * This is only for the M1 split-phase path after a same-device upload-init re-enumeration has
-     * already been proven and consumed by the caller. Ordinary Recovery uploads must use [sendStream].
-     */
-    internal fun sendStreamAfterInitReenumeration(
-        input: InputStream,
-        length: Long,
-        onProgress: ((Progress) -> Unit)? = null
-    ): Result {
-        require(length > 0L) { "Post-init Recovery upload length must be positive" }
-        return sendBulkStream(input, length, "initResult=external-reenumeration-proof", onProgress)
     }
 
     private fun sendBulkStream(
