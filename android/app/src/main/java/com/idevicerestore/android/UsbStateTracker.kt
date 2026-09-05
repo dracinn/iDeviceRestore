@@ -1,7 +1,7 @@
 package com.idevicerestore.android
 
 import android.hardware.usb.UsbDevice
-import java.time.Duration
+import android.os.SystemClock
 import java.time.Instant
 import java.util.ArrayDeque
 import java.util.Locale
@@ -37,6 +37,7 @@ class UsbStateTracker(private val capacity: Int = 32) {
 
     private val events = ArrayDeque<Event>()
     private var lastEvent: Event? = null
+    private var lastElapsedRealtimeMs: Long? = null
 
     @Synchronized
     fun observe(device: UsbDevice): Event? {
@@ -71,8 +72,11 @@ class UsbStateTracker(private val capacity: Int = 32) {
     @Synchronized
     private fun append(state: State, deviceName: String?, message: String): Event {
         val now = Instant.now()
+        val elapsedRealtimeMs = SystemClock.elapsedRealtime()
         val previous = lastEvent
-        val duration = previous?.let { Duration.between(it.timestamp, now).toMillis().coerceAtLeast(0) }
+        val duration = lastElapsedRealtimeMs?.let { previousElapsed ->
+            (elapsedRealtimeMs - previousElapsed).coerceAtLeast(0L)
+        }
         val event = Event(
             timestamp = now,
             state = state,
@@ -84,6 +88,7 @@ class UsbStateTracker(private val capacity: Int = 32) {
         events.addLast(event)
         while (events.size > capacity) events.removeFirst()
         lastEvent = event
+        lastElapsedRealtimeMs = elapsedRealtimeMs
         return event
     }
 }
