@@ -14,7 +14,7 @@ import androidx.appcompat.widget.AppCompatButton
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Explicit second hardware-test boundary: upload and execute only personalized iBEC from M1 Stage-1 Recovery. */
+/** Explicit hardware-test boundary for M1 Stage-1 Recovery upload initialization diagnostics. */
 class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatButton(context, attrs) {
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
@@ -31,14 +31,19 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
     private fun refreshState() {
         val activity = activity() ?: return
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
-        when (IbecTransitionObservationStore.snapshot().state) {
-            IbecTransitionObservationStore.State.EXECUTING -> { isEnabled = false; text = "Sending iBEC…"; return }
+        val observation = IbecTransitionObservationStore.snapshot()
+        when (observation.state) {
+            IbecTransitionObservationStore.State.EXECUTING -> { isEnabled = false; text = "Testing Upload Init…"; return }
             IbecTransitionObservationStore.State.WAITING_FOR_RECOVERY -> { observe(activity, usb); return }
-            IbecTransitionObservationStore.State.SUCCEEDED -> { isEnabled = false; text = "iBEC Transition Observed"; return }
+            IbecTransitionObservationStore.State.SUCCEEDED -> {
+                isEnabled = false
+                text = if (observation.boundary == IbecTransitionObservationStore.Boundary.UPLOAD_INIT_ONLY) "Upload Init Re-enumeration Observed" else "iBEC Transition Observed"
+                return
+            }
             IbecTransitionObservationStore.State.FAILED -> IbecTransitionObservationStore.reset()
             IbecTransitionObservationStore.State.IDLE -> Unit
         }
-        if (inFlight.get()) { isEnabled = false; text = "Sending iBEC…"; return }
+        if (inFlight.get()) { isEnabled = false; text = "Testing Upload Init…"; return }
 
         val recovery = recoveryDevice(usb)
         val proofBeforePreparation = Stage1RecoveryProofStore.snapshot()
@@ -73,7 +78,7 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         val identityKey = deviceIdentityKey(recovery!!)
         val proof = Stage1RecoveryProofStore.snapshot()
         if (proof.deviceIdentityKey != null && proof.deviceIdentityKey != identityKey) {
-            Stage1RecoveryProofStore.fail(proof.deviceIdentityKey, "Recovery device identity changed before iBEC readiness")
+            Stage1RecoveryProofStore.fail(proof.deviceIdentityKey, "Recovery device identity changed before upload-init readiness")
         }
         val currentProof = Stage1RecoveryProofStore.snapshot()
         when (currentProof.state) {
@@ -81,19 +86,13 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 isEnabled = currentProof.deviceIdentityKey == identityKey && currentProof.bootStage == STAGE_1
                 text = if (isEnabled) READY_LABEL else "Stage-1 Recovery Not Proven"
             }
-            Stage1RecoveryProofStore.State.PROBING -> {
-                isEnabled = false
-                text = "Verifying Stage-1 Recovery…"
-            }
+            Stage1RecoveryProofStore.State.PROBING -> { isEnabled = false; text = "Verifying Stage-1 Recovery…" }
             Stage1RecoveryProofStore.State.UNKNOWN -> {
                 isEnabled = false
                 text = "Verifying Stage-1 Recovery…"
                 verifyStage1Recovery(activity, usb, recovery, identityKey)
             }
-            Stage1RecoveryProofStore.State.FAILED -> {
-                isEnabled = false
-                text = "Stage-1 Recovery Lost"
-            }
+            Stage1RecoveryProofStore.State.FAILED -> { isEnabled = false; text = "Stage-1 Recovery Lost" }
         }
     }
 
@@ -164,7 +163,12 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
     private fun confirm() {
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
-        AlertDialog.Builder(activity).setTitle("Run M1 iBEC transition test?").setMessage("This state-changing hardware test sends only the already-personalized iBEC from the proven Stage-1 Recovery state, executes it using the Apple-silicon 'go' sequence, observes USB re-enumeration, and stops. It will not send RestoreRamDisk, SEP, DeviceTree, KernelCache, or start a filesystem restore/erase stage.").setNegativeButton("Cancel", null).setPositiveButton("Send iBEC Only") { _, _ -> start() }.show()
+        AlertDialog.Builder(activity)
+            .setTitle("Run M1 Recovery upload-init diagnostic?")
+            .setMessage("This state-changing diagnostic sends only libirecovery's zero-length Recovery upload initialization request (0x41/0), then observes USB re-enumeration and re-proves Stage-1. It will not send any iBEC bulk bytes, 'go', RestoreRamDisk, SEP, DeviceTree, KernelCache, or start a filesystem restore/erase stage.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Send Init Only") { _, _ -> start() }
+            .show()
     }
 
     private fun start() {
@@ -176,22 +180,23 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         val stage1Proof = Stage1RecoveryProofStore.snapshot()
         if (stage1Proof.state != Stage1RecoveryProofStore.State.PROVEN || stage1Proof.deviceIdentityKey != initialIdentityKey || stage1Proof.bootStage != STAGE_1) {
             inFlight.set(false)
-            log(activity, "iBEC transition test blocked: Stage-1 Recovery proof is missing or stale")
+            log(activity, "iBEC upload-init diagnostic blocked: Stage-1 Recovery proof is missing or stale")
             refreshState()
             return
         }
-        IbecTransitionObservationStore.begin(usbKey(initialDevice))
-        isEnabled = false; text = "Sending iBEC…"
-        log(activity, "iBEC transition test: explicit user confirmation received; boundary=iBEC-only")
-        setOperation(activity, "M1 iBEC-only Recovery transition test starting…", true)
+        IbecTransitionObservationStore.begin(usbKey(initialDevice), IbecTransitionObservationStore.Boundary.UPLOAD_INIT_ONLY)
+        isEnabled = false
+        text = "Testing Upload Init…"
+        log(activity, "iBEC upload-init diagnostic: explicit user confirmation received; boundary=upload-init-only")
+        setOperation(activity, "M1 Recovery upload-init diagnostic starting…", true)
         worker.execute {
             var connection: android.hardware.usb.UsbDeviceConnection? = null
             try {
                 val device = recoveryDevice(usb) ?: error("No permitted Apple Recovery device is connected")
-                require(usbKey(device) == IbecTransitionObservationStore.snapshot().sourceUsbKey) { "Recovery device changed before iBEC upload" }
-                require(deviceIdentityKey(device) == initialIdentityKey) { "Recovery device identity changed before iBEC upload" }
+                require(usbKey(device) == IbecTransitionObservationStore.snapshot().sourceUsbKey) { "Recovery device changed before upload-init diagnostic" }
+                require(deviceIdentityKey(device) == initialIdentityKey) { "Recovery device identity changed before upload-init diagnostic" }
                 val ids = AppleUsb.bootIdentifiers(device) ?: error("Recovery boot identifiers unavailable")
-                require(ids.cpidHex.equals(M1_CPID, true)) { "iBEC transition test is restricted to M1 CPID 0x$M1_CPID" }
+                require(ids.cpidHex.equals(M1_CPID, true)) { "Upload-init diagnostic is restricted to M1 CPID 0x$M1_CPID" }
                 val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable")
                 require(foundationMatchesDevice(ticket.foundation, device)) { "Recovery device does not match the ECID/chip/board identity used for the TSS ticket" }
                 val prepared = RestoreComponentPreparationStore.get() ?: error("Restore components unavailable")
@@ -200,43 +205,45 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 val file = ibec.personalizedFile ?: error("Personalized iBEC unavailable")
                 require(file.isFile && file.length() == ibec.personalizedBytes) { "Personalized iBEC file validation failed" }
                 PersonalizedImage4Validator.validate(file, ticket.apImg4Ticket, "iBEC")
-                log(activity, "iBEC transition test: personalized IMG4 and exact TSS ticket revalidated immediately before upload")
-                log(activity, "iBEC transition BEFORE: VID=%04x PID=%04x personality=%s mode=%s CPID=%s BDID=%s bytes=%d".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device), ids.cpidHex ?: "unknown", ids.bdidHex ?: "unknown", file.length()))
-                connection = usb.openDevice(device) ?: error("openDevice failed for iBEC transition test")
+                log(activity, "iBEC upload-init diagnostic: personalized iBEC/TSS context revalidated; payload remains unsent bytes=${file.length()}")
+                log(activity, "iBEC upload-init BEFORE: VID=%04x PID=%04x personality=%s mode=%s CPID=%s BDID=%s".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device), ids.cpidHex ?: "unknown", ids.bdidHex ?: "unknown"))
+                connection = usb.openDevice(device) ?: error("openDevice failed for upload-init diagnostic")
                 val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim Recovery interface")
                 val bulkOut = claimed.bulkOut ?: error("Recovery bulk OUT endpoint unavailable")
                 val transport = RecoveryTransport(connection, claimed.bulkIn)
                 val liveBootStage = transport.getenv("boot-stage").value.trim()
                 val liveBuildVersion = runCatching { transport.getenv("build-version").value.trim() }.getOrNull()
-                require(liveBootStage == STAGE_1) { "Live Recovery boot-stage=$liveBootStage immediately before iBEC upload; expected Stage-1" }
+                require(liveBootStage == STAGE_1) { "Live Recovery boot-stage=$liveBootStage immediately before upload init; expected Stage-1" }
                 Stage1RecoveryProofStore.refresh(initialIdentityKey, liveBootStage, liveBuildVersion)
                 IbecTransitionObservationStore.recordPreUpload(liveBootStage, liveBuildVersion)
-                log(activity, "iBEC transition pre-upload gate: live boot-stage=$liveBootStage build-version=${liveBuildVersion ?: "unknown"} elapsedMs=${proofElapsedMs(Stage1RecoveryProofStore.snapshot())}")
+                log(activity, "iBEC upload-init preflight: live boot-stage=$liveBootStage build-version=${liveBuildVersion ?: "unknown"} elapsedMs=${proofElapsedMs(Stage1RecoveryProofStore.snapshot())}")
                 val setInterface = connection.setInterface(claimed.intf)
-                log(activity, "iBEC transition USB: claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}; setInterface=$setInterface; bulkOut=0x%02x type=${bulkOut.type} maxPacket=${bulkOut.maxPacketSize}".format(bulkOut.address))
+                log(activity, "iBEC upload-init USB: claimed interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} class=${claimed.intf.interfaceClass} subclass=${claimed.intf.interfaceSubclass} protocol=${claimed.intf.interfaceProtocol}; setInterface=$setInterface; bulkOut=0x%02x type=${bulkOut.type} maxPacket=${bulkOut.maxPacketSize}".format(bulkOut.address))
                 require(setInterface) { "Android could not activate claimed Recovery interface id=${claimed.intf.id} alt=${claimed.intf.alternateSetting}" }
                 val session = RecoveryComponentSession(device, transport, connection, bulkOut)
-                val uploaded = session.uploadFile(RecoveryComponentSession.Component.IBEC, file) { p -> setProgress(activity, p.percent) }
-                log(activity, "iBEC transition test: upload complete bytes=${uploaded.bytes} packets=${uploaded.packets} endpoint=0x%02x".format(uploaded.endpointAddress))
-                val execution = session.executeAppleSiliconIbec()
-                log(activity, "iBEC transition test: go accepted bytes=${execution.goCommandBytes} followUpAccepted=${execution.followUpAccepted} followUpError=${execution.followUpError?.javaClass?.simpleName ?: "none"}")
-                log(activity, "iBEC transition test: STOP boundary armed — no RestoreRamDisk/SEP/DeviceTree/KernelCache payload will be sent")
+                val initResult = session.initializeUpload()
+                log(activity, "iBEC upload-init request: type=0x41 request=0x00 value=0 index=0 result=$initResult")
                 IbecTransitionObservationStore.waiting(SystemClock.elapsedRealtime())
-                setOperation(activity, "iBEC executed — observing USB re-enumeration; no further payloads will be sent", true)
+                log(activity, "iBEC upload-init diagnostic: STOP boundary armed — zero iBEC bulk bytes sent; no go command sent; observing same-device Recovery re-enumeration")
+                setOperation(activity, "Upload init issued — observing Recovery re-enumeration; no iBEC payload will be sent", true)
             } catch (t: Throwable) {
                 IbecTransitionObservationStore.fail(t.message ?: t.javaClass.simpleName)
-                log(activity, "iBEC transition test FAILED: ${t.javaClass.simpleName}: ${t.message}")
-                setOperation(activity, "iBEC transition test failed: ${t.message ?: t.javaClass.simpleName}", false)
+                log(activity, "iBEC upload-init diagnostic FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                setOperation(activity, "Upload-init diagnostic failed: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
-                connection?.close(); if (connection != null) log(activity, "iBEC transition test: Recovery USB connection closed")
-                inFlight.set(false); activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
+                connection?.close()
+                if (connection != null) log(activity, "iBEC upload-init diagnostic: Recovery USB connection closed")
+                inFlight.set(false)
+                activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
             }
         }
     }
 
     private fun observe(activity: AppCompatActivity, usb: UsbManager) {
-        isEnabled = false; text = "Observing iBEC Re-enumeration…"
         val state = IbecTransitionObservationStore.snapshot()
+        val initOnly = state.boundary == IbecTransitionObservationStore.Boundary.UPLOAD_INIT_ONLY
+        isEnabled = false
+        text = if (initOnly) "Observing Upload Init…" else "Observing iBEC Re-enumeration…"
         val elapsed = SystemClock.elapsedRealtime() - state.startedAtElapsedMs
         val candidate = usb.deviceList.values.firstOrNull { it.vendorId == AppleUsb.APPLE_VID && usb.hasPermission(it) && AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY }
         if (candidate != null && postStateProbeInFlight.compareAndSet(false, true)) {
@@ -244,10 +251,11 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
         }
         if (elapsed >= RECOVERY_RECONNECT_TIMEOUT_MS && !postStateProbeInFlight.get()) {
             val finalState = IbecTransitionObservationStore.snapshot()
-            IbecTransitionObservationStore.fail("Timed out waiting for classified same-device Recovery after iBEC")
-            log(activity, "iBEC transition RESULT: timeout elapsedMs=$elapsed preBuild=${finalState.preBuildVersion ?: "unknown"} postBuild=${finalState.postBuildVersion ?: "unknown"} classification=${finalState.classification ?: "none"}; test stopped and may be retried")
+            val label = if (initOnly) "upload-init diagnostic" else "iBEC transition"
+            IbecTransitionObservationStore.fail("Timed out waiting for classified same-device Recovery after $label")
+            log(activity, "$label RESULT: timeout elapsedMs=$elapsed preBuild=${finalState.preBuildVersion ?: "unknown"} postBuild=${finalState.postBuildVersion ?: "unknown"} classification=${finalState.classification ?: "none"}; test stopped and may be retried")
             text = READY_LABEL
-            setOperation(activity, "iBEC transition timed out waiting for a classified Recovery state; test stopped", false)
+            setOperation(activity, "$label timed out waiting for a classified Recovery state; test stopped", false)
         }
     }
 
@@ -257,19 +265,21 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
             try {
                 val current = IbecTransitionObservationStore.snapshot()
                 if (current.state != IbecTransitionObservationStore.State.WAITING_FOR_RECOVERY) return@execute
-                val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable during post-iBEC observation")
+                val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable during Recovery observation")
                 if (!foundationMatchesDevice(ticket.foundation, device)) return@execute
                 val key = usbKey(device)
-                connection = usb.openDevice(device) ?: error("openDevice failed for post-iBEC Recovery classification")
-                val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim post-iBEC Recovery interface")
+                connection = usb.openDevice(device) ?: error("openDevice failed for Recovery classification")
+                val claimed = AppleUsb.claimBestInterface(device, connection) ?: error("Could not claim observed Recovery interface")
                 val transport = RecoveryTransport(connection, claimed.bulkIn)
                 val postBootStage = transport.getenv("boot-stage").value.trim().takeIf { it.isNotEmpty() }
                 val postBuildVersion = runCatching { transport.getenv("build-version").value.trim().takeIf { it.isNotEmpty() } }.getOrNull()
+                val initOnly = stateAtDispatch.boundary == IbecTransitionObservationStore.Boundary.UPLOAD_INIT_ONLY
+                val label = if (initOnly) "iBEC upload-init diagnostic" else "iBEC transition"
                 if (postBootStage == null || postBuildVersion == null) {
                     val previous = IbecTransitionObservationStore.snapshot()
                     if (previous.classification != "post-state-unreadable") {
                         IbecTransitionObservationStore.recordPostState(postBootStage, postBuildVersion, "post-state-unreadable")
-                        log(activity, "iBEC transition observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} post-state read returned blank boot-stage/build-version; continuing observation")
+                        log(activity, "$label observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} post-state read returned blank boot-stage/build-version; continuing observation")
                     }
                     return@execute
                 }
@@ -289,18 +299,25 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
                 IbecTransitionObservationStore.recordPostState(postBootStage, postBuildVersion, classification)
                 if (previous.postBootStage != postBootStage || previous.postBuildVersion != postBuildVersion || previous.classification != classification || previous.lastObservedUsbKey != key) {
                     IbecTransitionObservationStore.observed(key)
-                    log(activity, "iBEC transition observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} VID=%04x PID=%04x personality=%s mode=%s identity-continuity=matched preBootStage=${preBootStage ?: "unknown"} postBootStage=$postBootStage preBuild=${preBuildVersion ?: "unknown"} postBuild=$postBuildVersion classification=$classification usbKeyChanged=$usbKeyChanged".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device)))
+                    log(activity, "$label observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} VID=%04x PID=%04x personality=%s mode=%s identity-continuity=matched preBootStage=${preBootStage ?: "unknown"} postBootStage=$postBootStage preBuild=${preBuildVersion ?: "unknown"} postBuild=$postBuildVersion classification=$classification usbKeyChanged=$usbKeyChanged".format(device.vendorId, device.productId, AppleUsb.personality(device), AppleUsb.mode(device)))
                 }
                 if (bootStageChanged || buildChanged || usbKeyChanged) {
-                    IbecTransitionObservationStore.succeed("Recovery post-iBEC state classified as $classification")
-                    log(activity, "iBEC transition RESULT: classification=$classification elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} preBuild=${preBuildVersion ?: "unknown"} postBuild=$postBuildVersion preBootStage=${preBootStage ?: "unknown"} postBootStage=$postBootStage; STOPPED before restore-OS component upload")
-                    setOperation(activity, "iBEC transition observed ($classification); stopped before restore-OS payloads", false)
+                    if (initOnly) {
+                        IbecTransitionObservationStore.succeed("Recovery upload-init state classified as $classification")
+                        log(activity, "iBEC upload-init diagnostic RESULT: classification=$classification elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} preBuild=${preBuildVersion ?: "unknown"} postBuild=$postBuildVersion preBootStage=${preBootStage ?: "unknown"} postBootStage=$postBootStage; ZERO iBEC bulk bytes sent; STOPPED before go")
+                        setOperation(activity, "Upload-init re-enumeration observed ($classification); no iBEC payload was sent", false)
+                    } else {
+                        IbecTransitionObservationStore.succeed("Recovery post-iBEC state classified as $classification")
+                        log(activity, "iBEC transition RESULT: classification=$classification elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} preBuild=${preBuildVersion ?: "unknown"} postBuild=$postBuildVersion preBootStage=${preBootStage ?: "unknown"} postBootStage=$postBootStage; STOPPED before restore-OS component upload")
+                        setOperation(activity, "iBEC transition observed ($classification); stopped before restore-OS payloads", false)
+                    }
                 }
             } catch (t: Throwable) {
                 val previous = IbecTransitionObservationStore.snapshot()
                 if (previous.state == IbecTransitionObservationStore.State.WAITING_FOR_RECOVERY && previous.classification != "post-state-unreadable") {
                     IbecTransitionObservationStore.recordPostState(null, null, "post-state-unreadable")
-                    log(activity, "iBEC transition observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} post-state read unavailable: ${t.javaClass.simpleName}: ${t.message}; continuing observation")
+                    val label = if (stateAtDispatch.boundary == IbecTransitionObservationStore.Boundary.UPLOAD_INIT_ONLY) "iBEC upload-init diagnostic" else "iBEC transition"
+                    log(activity, "$label observe: elapsedMs=${SystemClock.elapsedRealtime() - stateAtDispatch.startedAtElapsedMs} post-state read unavailable: ${t.javaClass.simpleName}: ${t.message}; continuing observation")
                 }
             } finally {
                 connection?.close()
@@ -319,5 +336,14 @@ class IbecTransitionButton @JvmOverloads constructor(context: Context, attrs: At
     private fun setOperation(a: AppCompatActivity, message: String, busy: Boolean) = a.runOnUiThread { a.findViewById<TextView?>(R.id.operationStatus)?.text = message; a.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply { visibility = if (busy) View.VISIBLE else View.GONE; if (busy) isIndeterminate = true } }
     private fun log(a: AppCompatActivity, message: String) = a.runOnUiThread { val delivered = runCatching { val m = a.javaClass.getDeclaredMethod("log", String::class.java); m.isAccessible = true; m.invoke(a, message); true }.getOrDefault(false); if (!delivered) a.findViewById<TextView?>(R.id.logView)?.append(message.trimEnd() + "\n") }
     private fun activity(): AppCompatActivity? { var c: Context? = context; while (c is ContextWrapper) { if (c is AppCompatActivity) return c; c = c.baseContext }; return c as? AppCompatActivity }
-    companion object { private const val REFRESH_MS = 1000L; private const val STAGE_1_WATCHDOG_MS = 5000L; private const val STAGE_1_HEARTBEAT_LOG_MS = 15000L; private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L; private const val M1_CPID = "8103"; private const val STAGE_1 = "1"; private const val READY_LABEL = "Test M1 iBEC Recovery Transition" }
+
+    companion object {
+        private const val REFRESH_MS = 1000L
+        private const val STAGE_1_WATCHDOG_MS = 5000L
+        private const val STAGE_1_HEARTBEAT_LOG_MS = 15000L
+        private const val RECOVERY_RECONNECT_TIMEOUT_MS = 120_000L
+        private const val M1_CPID = "8103"
+        private const val STAGE_1 = "1"
+        private const val READY_LABEL = "Test M1 Recovery Upload Init"
+    }
 }
