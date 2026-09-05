@@ -2,7 +2,7 @@ package com.idevicerestore.android
 
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
-import java.time.Duration
+import android.os.SystemClock
 import java.time.Instant
 import java.util.ArrayDeque
 import java.util.Locale
@@ -14,6 +14,7 @@ class BootDiagnosticEngine(
     private val events = mutableListOf<BootDiagnosticEvent>()
     private val recentModes = ArrayDeque<AppleUsb.Mode>()
     private var lastDeviceName: String? = null
+    private var lastElapsedRealtimeMs: Long? = null
 
     fun scan(): BootDiagnosticSnapshot {
         val apple = usbManager.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID }
@@ -192,14 +193,18 @@ class BootDiagnosticEngine(
         val last = events.lastOrNull()
         if (last?.state == state && last.message.substringBefore(" after ") == message) return
         val now = Instant.now()
+        val elapsedRealtimeMs = SystemClock.elapsedRealtime()
         val timedMessage = if (last != null && last.state != state) {
-            val millis = Duration.between(last.timestamp, now).toMillis().coerceAtLeast(0)
+            val millis = lastElapsedRealtimeMs?.let { previousElapsed ->
+                (elapsedRealtimeMs - previousElapsed).coerceAtLeast(0L)
+            } ?: 0L
             "$message after %.3f s in ${last.state}".format(Locale.US, millis / 1000.0)
         } else {
             message
         }
         val event = BootDiagnosticEvent(timestamp = now, state = state, message = timedMessage)
         events += event
+        lastElapsedRealtimeMs = elapsedRealtimeMs
         logger.log("${event.state}: ${event.message}")
     }
 }
