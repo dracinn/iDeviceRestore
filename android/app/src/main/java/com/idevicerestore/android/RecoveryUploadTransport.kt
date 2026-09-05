@@ -46,6 +46,17 @@ class RecoveryUploadTransport(
         }
     }
 
+    /** Issues one libirecovery Recovery upload initialization request; no bulk bytes are sent. */
+    fun initializeUpload(): Int = connection.controlTransfer(
+        LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
+        LIBIRECOVERY_UPLOAD_INIT_REQUEST,
+        0,
+        0,
+        null,
+        0,
+        USB_TIMEOUT_MS
+    )
+
     /** Uploads an in-memory component using libirecovery's 0x8000-byte Recovery packet size. */
     fun sendBuffer(
         buffer: ByteArray,
@@ -55,7 +66,7 @@ class RecoveryUploadTransport(
     /**
      * Streams exactly [length] bytes to iBoot over Recovery bulk endpoint 0x04.
      *
-     * Upstream libirecovery primes the Recovery upload path with a zero-length 0x41/0 control-OUT
+     * Upstream libirecovery primes each Recovery upload with a zero-length 0x41/0 control-OUT
      * request before sending any bulk data, then uses 0x8000-byte packets and treats a short USB
      * write as an upload failure. This method follows that sequence while allowing large components
      * to be streamed without loading the entire image into memory.
@@ -72,23 +83,15 @@ class RecoveryUploadTransport(
             return Result(0, 0, bulkOut.address)
         }
 
-        val uploadInitResult = connection.controlTransfer(
-            LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
-            LIBIRECOVERY_UPLOAD_INIT_REQUEST,
-            0,
-            0,
-            null,
-            0,
-            USB_TIMEOUT_MS
-        )
-        if (uploadInitResult < 0) {
+        val initResult = initializeUpload()
+        if (initResult < 0) {
             throw IOException(
                 "Recovery upload initialization failed: type=0x%02X request=0x%02X value=0 index=0 timeoutMs=%d result=%d"
                     .format(
                         LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
                         LIBIRECOVERY_UPLOAD_INIT_REQUEST,
                         USB_TIMEOUT_MS,
-                        uploadInitResult
+                        initResult
                     )
             )
         }
@@ -111,7 +114,7 @@ class RecoveryUploadTransport(
             )
             if (written < 0) {
                 throw IOException(
-                    "Recovery bulk upload failed at packet $packetIndex: initResult=$uploadInitResult endpoint=0x%02X type=%d maxPacket=%d requested=%d timeoutMs=%d result=%d"
+                    "Recovery bulk upload failed at packet $packetIndex: initResult=$initResult endpoint=0x%02X type=%d maxPacket=%d requested=%d timeoutMs=%d result=%d"
                         .format(
                             bulkOut.address,
                             bulkOut.type,
@@ -124,7 +127,7 @@ class RecoveryUploadTransport(
             }
             if (written != wanted) {
                 throw IOException(
-                    "Recovery bulk upload short write at packet $packetIndex: initResult=$uploadInitResult endpoint=0x%02X maxPacket=%d expected=%d got=%d"
+                    "Recovery bulk upload short write at packet $packetIndex: initResult=$initResult endpoint=0x%02X maxPacket=%d expected=%d got=%d"
                         .format(bulkOut.address, bulkOut.maxPacketSize, wanted, written)
                 )
             }

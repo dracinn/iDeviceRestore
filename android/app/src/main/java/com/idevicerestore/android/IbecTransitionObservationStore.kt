@@ -3,9 +3,11 @@ package com.idevicerestore.android
 /** Process-local state for the guarded iBEC transition so activity recreation cannot lose observation. */
 object IbecTransitionObservationStore {
     enum class State { IDLE, EXECUTING, WAITING_FOR_RECOVERY, SUCCEEDED, FAILED }
+    enum class Boundary { IBEC_EXECUTION, UPLOAD_INIT_ONLY }
 
     data class Snapshot(
         val state: State,
+        val boundary: Boundary = Boundary.IBEC_EXECUTION,
         val sourceUsbKey: String? = null,
         val startedAtElapsedMs: Long = 0L,
         val lastObservedUsbKey: String? = null,
@@ -21,8 +23,8 @@ object IbecTransitionObservationStore {
 
     fun snapshot(): Snapshot = current
 
-    @Synchronized fun begin(sourceUsbKey: String) {
-        current = Snapshot(State.EXECUTING, sourceUsbKey = sourceUsbKey)
+    @Synchronized fun begin(sourceUsbKey: String, boundary: Boundary = Boundary.IBEC_EXECUTION) {
+        current = Snapshot(State.EXECUTING, boundary = boundary, sourceUsbKey = sourceUsbKey)
     }
 
     @Synchronized fun recordPreUpload(bootStage: String, buildVersion: String?) {
