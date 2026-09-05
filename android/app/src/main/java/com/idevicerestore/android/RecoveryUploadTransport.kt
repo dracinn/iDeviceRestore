@@ -77,7 +77,6 @@ class RecoveryUploadTransport(
         onProgress: ((Progress) -> Unit)? = null
     ): Result {
         require(length >= 0L) { "Recovery upload length must be non-negative" }
-
         if (length == 0L) {
             onProgress?.invoke(Progress(0, 0, 0))
             return Result(0, 0, bulkOut.address)
@@ -95,7 +94,30 @@ class RecoveryUploadTransport(
                     )
             )
         }
+        return sendBulkStream(input, length, "initResult=$initResult", onProgress)
+    }
 
+    /**
+     * Sends bulk data without issuing 0x41/0 again.
+     *
+     * This is only for the M1 split-phase path after a same-device upload-init re-enumeration has
+     * already been proven and consumed by the caller. Ordinary Recovery uploads must use [sendStream].
+     */
+    internal fun sendStreamAfterInitReenumeration(
+        input: InputStream,
+        length: Long,
+        onProgress: ((Progress) -> Unit)? = null
+    ): Result {
+        require(length > 0L) { "Post-init Recovery upload length must be positive" }
+        return sendBulkStream(input, length, "initResult=external-reenumeration-proof", onProgress)
+    }
+
+    private fun sendBulkStream(
+        input: InputStream,
+        length: Long,
+        initEvidence: String,
+        onProgress: ((Progress) -> Unit)?
+    ): Result {
         val packet = ByteArray(RECOVERY_PACKET_SIZE)
         var remaining = length
         var sent = 0L
@@ -114,7 +136,7 @@ class RecoveryUploadTransport(
             )
             if (written < 0) {
                 throw IOException(
-                    "Recovery bulk upload failed at packet $packetIndex: initResult=$initResult endpoint=0x%02X type=%d maxPacket=%d requested=%d timeoutMs=%d result=%d"
+                    "Recovery bulk upload failed at packet $packetIndex: $initEvidence endpoint=0x%02X type=%d maxPacket=%d requested=%d timeoutMs=%d result=%d"
                         .format(
                             bulkOut.address,
                             bulkOut.type,
@@ -127,7 +149,7 @@ class RecoveryUploadTransport(
             }
             if (written != wanted) {
                 throw IOException(
-                    "Recovery bulk upload short write at packet $packetIndex: initResult=$initResult endpoint=0x%02X maxPacket=%d expected=%d got=%d"
+                    "Recovery bulk upload short write at packet $packetIndex: $initEvidence endpoint=0x%02X maxPacket=%d expected=%d got=%d"
                         .format(bulkOut.address, bulkOut.maxPacketSize, wanted, written)
                 )
             }
