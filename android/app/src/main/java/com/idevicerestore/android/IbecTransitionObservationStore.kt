@@ -51,6 +51,30 @@ object IbecTransitionObservationStore {
         current = current.copy(state = State.FAILED, message = message)
     }
 
+    /**
+     * Consumes exactly one successful upload-init re-enumeration proof.
+     *
+     * The caller must re-prove the current Recovery boot-stage/build before invoking this method.
+     * A successful consume resets the observation so a later bulk upload cannot reuse stale proof.
+     */
+    @Synchronized fun consumeUploadInitProof(
+        currentUsbKey: String,
+        bootStage: String,
+        buildVersion: String
+    ): Boolean {
+        val s = current
+        val matches = s.state == State.SUCCEEDED &&
+            s.boundary == Boundary.UPLOAD_INIT_ONLY &&
+            s.lastObservedUsbKey == currentUsbKey &&
+            s.postBootStage?.trim() == bootStage.trim() &&
+            s.postBuildVersion?.trim() == buildVersion.trim() &&
+            bootStage.trim() == "1" &&
+            buildVersion.isNotBlank()
+        if (!matches) return false
+        current = Snapshot(State.IDLE)
+        return true
+    }
+
     @Synchronized fun reset() {
         current = Snapshot(State.IDLE)
     }
