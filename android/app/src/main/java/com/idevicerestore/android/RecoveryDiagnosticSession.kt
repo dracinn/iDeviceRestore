@@ -64,7 +64,11 @@ class RecoveryDiagnosticSession(
         }
 
         val readiness = buildReadiness(results)
-        RestorePreflightEvidenceStore.recordRecovery(device, readiness)
+        if (readiness.recoveryMode) {
+            RestorePreflightEvidenceStore.recordRecovery(device, readiness)
+        } else {
+            RestorePreflightEvidenceStore.clearRecovery()
+        }
         return Snapshot(
             variables = results,
             console = consoleResult,
