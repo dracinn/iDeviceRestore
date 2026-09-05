@@ -102,6 +102,7 @@ class IbecPostInitUploadButton @JvmOverloads constructor(
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
         worker.execute {
             var connection: android.hardware.usb.UsbDeviceConnection? = null
+            var proofConsumed = false
             try {
                 val observation = IbecTransitionObservationStore.snapshot()
                 require(observation.state == IbecTransitionObservationStore.State.SUCCEEDED) { "Upload-init re-enumeration proof is not available" }
@@ -146,7 +147,8 @@ class IbecPostInitUploadButton @JvmOverloads constructor(
                     buildVersion = liveBuildVersion
                 )
                 require(consumed) { "Upload-init proof changed before bulk upload; refusing to bypass 0x41/0" }
-                log(activity, "iBEC post-init token: consumed one-shot upload-init re-enumeration proof; 0x41/0 will NOT be sent again")
+                proofConsumed = true
+                log(activity, "iBEC post-init token: consumed one-shot upload-init re-enumeration proof; transition state held busy; 0x41/0 will NOT be sent again")
 
                 val uploader = RecoveryUploadTransport(connection, bulkOut)
                 val result = FileInputStream(file).use { input ->
@@ -166,6 +168,10 @@ class IbecPostInitUploadButton @JvmOverloads constructor(
             } finally {
                 connection?.close()
                 if (connection != null) log(activity, "iBEC post-init upload: Recovery USB connection closed")
+                if (proofConsumed) {
+                    IbecTransitionObservationStore.finishConsumedUpload()
+                    log(activity, "iBEC post-init token: upload ownership released after Recovery connection close")
+                }
                 inFlight.set(false)
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
             }
