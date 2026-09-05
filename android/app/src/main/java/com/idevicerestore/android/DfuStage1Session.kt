@@ -39,6 +39,7 @@ class DfuStage1Session(
         val blocks: Int,
         val finalDfuState: Int,
         val manifestationState: Int,
+        val usbResetResult: AndroidUsbReset.Result,
         val transition: RestoreUsbStateMachine.Snapshot
     )
 
@@ -80,14 +81,21 @@ class DfuStage1Session(
 
         val waiting = transitions.expectRecoveryReconnect()
         logger("DFU stage1: sending libirecovery-compatible finish request; ${waiting.message}")
-        val manifestationState = uploader.finishManifestation(upload.blocksSent)
-        logger("DFU stage1: finish state=${DfuTransport.stateName(manifestationState)}; waiting for USB re-enumeration")
+        val finish = uploader.finishManifestation(upload.blocksSent)
+        val resetNote = when (finish.usbResetResult) {
+            AndroidUsbReset.Result.SUCCESS -> "host USB reset reported success"
+            AndroidUsbReset.Result.INDETERMINATE_FALSE -> "host USB reset returned false after manifestation; treating as indeterminate and deferring outcome to USB re-enumeration"
+        }
+        logger(
+            "DFU stage1: finish state=${DfuTransport.stateName(finish.manifestationState)}; $resetNote; waiting for USB re-enumeration"
+        )
 
         return UploadResult(
             bytes = upload.bytesSent,
             blocks = upload.blocksSent,
             finalDfuState = upload.finalState,
-            manifestationState = manifestationState,
+            manifestationState = finish.manifestationState,
+            usbResetResult = finish.usbResetResult,
             transition = transitions.snapshot()
         )
     }
