@@ -10,6 +10,11 @@ import android.hardware.usb.UsbDeviceConnection
  * restore must remain disabled rather than approximating libirecovery's required host USB reset.
  */
 object AndroidUsbReset {
+    enum class Result {
+        SUCCESS,
+        INDETERMINATE_FALSE
+    }
+
     data class Capability(
         val available: Boolean,
         val reason: String
@@ -25,11 +30,19 @@ object AndroidUsbReset {
         Capability(false, "Android USB reset unavailable: ${it.javaClass.simpleName}: ${it.message}")
     }
 
-    fun reset(connection: UsbDeviceConnection) {
+    /**
+     * Invokes Android's host-side USB reset.
+     *
+     * A false framework return is intentionally treated as indeterminate rather than fatal because
+     * Apple DFU manifestation can detach the device while resetDevice() is still returning. The
+     * caller must decide success from the subsequent USB personality/identity re-enumeration.
+     * Reflection/invocation failures remain fatal because no reset attempt can be established.
+     */
+    fun reset(connection: UsbDeviceConnection): Result {
         val method = runCatching { connection.javaClass.getMethod("resetDevice") }
             .getOrElse { throw IllegalStateException("Android USB reset API is unavailable", it) }
         val result = runCatching { method.invoke(connection) as? Boolean }
             .getOrElse { throw IllegalStateException("Android USB reset invocation failed", it) }
-        check(result == true) { "Android USB reset returned false" }
+        return if (result == true) Result.SUCCESS else Result.INDETERMINATE_FALSE
     }
 }
