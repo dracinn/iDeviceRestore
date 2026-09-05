@@ -66,9 +66,10 @@ class RecoveryUploadTransport(
     /**
      * Streams exactly [length] bytes to iBoot over Recovery bulk endpoint 0x04.
      *
-     * Upstream libirecovery primes each Recovery upload with a zero-length 0x41/0 control-OUT
-     * request and immediately sends 0x8000-byte bulk packets on that same open USB connection.
-     * A failed initialization is fatal and never authorizes a later connection to bypass it.
+     * Upstream libirecovery issues a zero-length 0x41/0 control-OUT request and then immediately
+     * attempts the first 0x8000-byte bulk packet on the same open USB client. The control-transfer
+     * result is not treated as the final upload verdict because some hosts can report an error while
+     * the device has already acted on the request. The first bulk transfer is therefore authoritative.
      */
     fun sendStream(
         input: InputStream,
@@ -82,17 +83,6 @@ class RecoveryUploadTransport(
         }
 
         val initResult = initializeUpload()
-        if (initResult < 0) {
-            throw IOException(
-                "Recovery upload initialization failed: type=0x%02X request=0x%02X value=0 index=0 timeoutMs=%d result=%d"
-                    .format(
-                        LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
-                        LIBIRECOVERY_UPLOAD_INIT_REQUEST,
-                        USB_TIMEOUT_MS,
-                        initResult
-                    )
-            )
-        }
         return sendBulkStream(input, length, "initResult=$initResult", onProgress)
     }
 
