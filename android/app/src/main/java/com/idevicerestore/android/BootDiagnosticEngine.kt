@@ -5,6 +5,7 @@ import android.hardware.usb.UsbManager
 import java.time.Duration
 import java.time.Instant
 import java.util.ArrayDeque
+import java.util.Locale
 
 class BootDiagnosticEngine(
     private val usbManager: UsbManager,
