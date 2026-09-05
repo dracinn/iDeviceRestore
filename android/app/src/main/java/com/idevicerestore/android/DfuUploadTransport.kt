@@ -28,6 +28,11 @@ class DfuUploadTransport(
         val appleSuffixBytes: Int = APPLE_DFU_TRAILER_SIZE
     )
 
+    data class FinishResult(
+        val manifestationState: Int,
+        val usbResetResult: AndroidUsbReset.Result
+    )
+
     init {
         require(interfaceId in 0..255) { "DFU interface id must be between 0 and 255" }
     }
@@ -92,7 +97,7 @@ class DfuUploadTransport(
      * zero-length DFU_DNLOAD using the next block number, GETSTATUS twice, then host USB reset.
      * This method is state-changing and may make the device immediately re-enumerate.
      */
-    fun finishManifestation(block: Int): Int {
+    fun finishManifestation(block: Int): FinishResult {
         require(block in 0..0xFFFF) { "DFU block number out of range" }
         val capability = AndroidUsbReset.capability(connection)
         check(capability.available) { capability.reason }
@@ -122,8 +127,8 @@ class DfuUploadTransport(
             }
         }
 
-        AndroidUsbReset.reset(connection)
-        return last.state
+        val resetResult = AndroidUsbReset.reset(connection)
+        return FinishResult(last.state, resetResult)
     }
 
     fun abort() {
