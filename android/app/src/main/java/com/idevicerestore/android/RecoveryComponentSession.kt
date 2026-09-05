@@ -59,6 +59,9 @@ class RecoveryComponentSession(
 
     fun lastUploadedComponent(): UploadedComponent? = lastUpload
 
+    /** Issues only the libirecovery Recovery upload initialization request; sends no component bytes. */
+    fun initializeUpload(): Int = uploader.initializeUpload()
+
     fun upload(
         component: Component,
         label: String,
