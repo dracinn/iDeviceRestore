@@ -6,6 +6,7 @@ enum class BootDiagnosticState {
     DISCONNECTED,
     APPLE_DEVICE,
     DFU,
+    WTF,
     RECOVERY,
     RECOVERY_RESPONSIVE,
     RECOVERY_UNRESPONSIVE,
