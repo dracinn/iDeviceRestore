@@ -14,7 +14,6 @@ class BootDiagnosticEngine(
     private val events = mutableListOf<BootDiagnosticEvent>()
     private val recentModes = ArrayDeque<AppleUsb.Mode>()
     private var lastDeviceName: String? = null
-    private var lastRecoverySnapshot: RecoveryDiagnosticSession.Snapshot? = null
 
     fun scan(): BootDiagnosticSnapshot {
         val apple = usbManager.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID }
@@ -84,7 +83,6 @@ class BootDiagnosticEngine(
             try {
                 val transport = RecoveryTransport(connection, claimed.bulkIn)
                 val recovery = RecoveryDiagnosticSession(device, connection, transport).snapshot()
-                lastRecoverySnapshot = recovery
                 recovery.variables.forEach { variable ->
                     val text = variable.result?.value ?: variable.error?.message ?: "no response"
                     logger.log("Recovery getenv ${variable.name}: $text")
@@ -120,7 +118,7 @@ class BootDiagnosticEngine(
     private fun snapshot(
         state: BootDiagnosticState,
         device: UsbDevice?,
-        recovery: RecoveryDiagnosticSession.Snapshot? = lastRecoverySnapshot
+        recovery: RecoveryDiagnosticSession.Snapshot? = null
     ): BootDiagnosticSnapshot {
         val result = BootDiagnosticSnapshot(
             state = state,
