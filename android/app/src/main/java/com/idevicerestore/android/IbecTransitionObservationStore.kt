@@ -2,7 +2,7 @@ package com.idevicerestore.android
 
 /** Process-local state for the guarded iBEC transition so activity recreation cannot lose observation. */
 object IbecTransitionObservationStore {
-    enum class State { IDLE, EXECUTING, WAITING_FOR_RECOVERY, SUCCEEDED, UPLOAD_IN_PROGRESS, FAILED }
+    enum class State { IDLE, EXECUTING, WAITING_FOR_RECOVERY, SUCCEEDED, FAILED }
     enum class Boundary { IBEC_EXECUTION, UPLOAD_INIT_ONLY }
 
     data class Snapshot(
@@ -55,8 +55,8 @@ object IbecTransitionObservationStore {
      * Consumes exactly one successful upload-init re-enumeration proof.
      *
      * The caller must re-prove the current Recovery boot-stage/build before invoking this method.
-     * A successful consume moves the shared state to UPLOAD_IN_PROGRESS so watchdogs cannot resume
-     * Recovery probing while the bulk transfer owns the interface. The caller must invoke
+     * A successful consume moves back to EXECUTING so the existing transition/watchdog UI remains
+     * suppressed while the bulk transfer owns Recovery. The caller must invoke
      * [finishConsumedUpload] only after the upload connection is closed.
      */
     @Synchronized fun consumeUploadInitProof(
@@ -74,17 +74,26 @@ object IbecTransitionObservationStore {
             buildVersion.isNotBlank()
         if (!matches) return false
         current = s.copy(
-            state = State.UPLOAD_IN_PROGRESS,
-            message = "Upload-init proof consumed; post-init iBEC bulk upload owns Recovery transport"
+            state = State.EXECUTING,
+            message = CONSUMED_UPLOAD_MESSAGE
         )
         return true
     }
 
     @Synchronized fun finishConsumedUpload() {
-        if (current.state == State.UPLOAD_IN_PROGRESS) current = Snapshot(State.IDLE)
+        if (
+            current.state == State.EXECUTING &&
+            current.boundary == Boundary.UPLOAD_INIT_ONLY &&
+            current.message == CONSUMED_UPLOAD_MESSAGE
+        ) {
+            current = Snapshot(State.IDLE)
+        }
     }
 
     @Synchronized fun reset() {
         current = Snapshot(State.IDLE)
     }
+
+    private const val CONSUMED_UPLOAD_MESSAGE =
+        "Upload-init proof consumed; post-init iBEC bulk upload owns Recovery transport"
 }
