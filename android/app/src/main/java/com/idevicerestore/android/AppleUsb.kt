@@ -159,10 +159,8 @@ object AppleUsb {
     )
 
     fun claimBestInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
-        RestorePreflightEvidenceStore.observeUsb(device)
         val candidates = mutableListOf<Candidate>()
         val personality = personality(device)
-        if (personality != Personality.RECOVERY) RestorePreflightEvidenceStore.clearRecovery()
 
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
