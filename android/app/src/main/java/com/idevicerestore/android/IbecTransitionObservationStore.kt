@@ -2,7 +2,7 @@ package com.idevicerestore.android
 
 /** Process-local state for the guarded iBEC transition so activity recreation cannot lose observation. */
 object IbecTransitionObservationStore {
-    enum class State { IDLE, EXECUTING, WAITING_FOR_RECOVERY, SUCCEEDED, FAILED }
+    enum class State { IDLE, EXECUTING, WAITING_FOR_RECOVERY, SUCCEEDED, UPLOAD_IN_PROGRESS, FAILED }
     enum class Boundary { IBEC_EXECUTION, UPLOAD_INIT_ONLY }
 
     data class Snapshot(
@@ -55,7 +55,9 @@ object IbecTransitionObservationStore {
      * Consumes exactly one successful upload-init re-enumeration proof.
      *
      * The caller must re-prove the current Recovery boot-stage/build before invoking this method.
-     * A successful consume resets the observation so a later bulk upload cannot reuse stale proof.
+     * A successful consume moves the shared state to UPLOAD_IN_PROGRESS so watchdogs cannot resume
+     * Recovery probing while the bulk transfer owns the interface. The caller must invoke
+     * [finishConsumedUpload] only after the upload connection is closed.
      */
     @Synchronized fun consumeUploadInitProof(
         currentUsbKey: String,
@@ -71,8 +73,15 @@ object IbecTransitionObservationStore {
             bootStage.trim() == "1" &&
             buildVersion.isNotBlank()
         if (!matches) return false
-        current = Snapshot(State.IDLE)
+        current = s.copy(
+            state = State.UPLOAD_IN_PROGRESS,
+            message = "Upload-init proof consumed; post-init iBEC bulk upload owns Recovery transport"
+        )
         return true
+    }
+
+    @Synchronized fun finishConsumedUpload() {
+        if (current.state == State.UPLOAD_IN_PROGRESS) current = Snapshot(State.IDLE)
     }
 
     @Synchronized fun reset() {
