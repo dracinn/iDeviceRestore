@@ -281,7 +281,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Each state-changing step requires explicit confirmation. The iBSS test stops in Stage-1 Recovery; the iBEC test then stops again before restore-OS payloads."
+                    android:text="Each state-changing step requires explicit confirmation. The iBSS test stops in Stage-1 Recovery; upload-init is isolated from iBEC bulk transfer; the post-init iBEC test stops before go."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.StartRestoreButton
@@ -298,7 +298,15 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:enabled="false"
-                    android:text="Test M1 iBEC Recovery Transition" />
+                    android:text="Test M1 Recovery Upload Init" />
+
+                <com.idevicerestore.android.IbecPostInitUploadButton
+                    android:id="@+id/ibecPostInitUploadButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Test M1 Post-init iBEC Bulk Upload" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
