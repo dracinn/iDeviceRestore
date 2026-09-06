@@ -66,7 +66,7 @@ class FirmwareDownloadService : Service() {
         }
 
         startAsForeground(version, buildId, 0, expectedSize)
-        broadcastState(STATE_RUNNING, total = expectedSize, message = "Starting Apple CDN download")
+        broadcastState(STATE_RUNNING, total = expectedSize, message = "Starting adaptive Apple CDN download")
 
         val downloader = FirmwareDownloader(logger = { message ->
             broadcastState(STATE_LOG, message = message)
@@ -76,19 +76,26 @@ class FirmwareDownloadService : Service() {
             destination = destination,
             expectedSize = expectedSize,
             expectedSha1 = intent.getStringExtra(EXTRA_SHA1),
-            connections = 1
+            connections = MAX_ADAPTIVE_CONNECTIONS
         )
 
         val active = downloader.start(request) { progress ->
             val now = System.currentTimeMillis()
             if (now - lastUiUpdateMs.get() >= 500L && lastUiUpdateMs.getAndSet(now) <= now) {
-                updateNotification(version, buildId, progress.downloadedBytes, progress.totalBytes)
+                updateNotification(
+                    version,
+                    buildId,
+                    progress.downloadedBytes,
+                    progress.totalBytes,
+                    progress.activeConnections
+                )
                 broadcastState(
                     STATE_RUNNING,
                     downloaded = progress.downloadedBytes,
                     total = progress.totalBytes,
                     bytesPerSecond = progress.bytesPerSecond,
-                    message = "Downloading from Apple CDN"
+                    activeConnections = progress.activeConnections,
+                    message = "Downloading from Apple CDN • ${progress.activeConnections} connection(s)"
                 )
             }
         }
@@ -129,35 +136,58 @@ class FirmwareDownloadService : Service() {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification(version, buildId, downloaded, total),
+            buildNotification(version, buildId, downloaded, total, 0),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
     }
 
-    private fun updateNotification(version: String, buildId: String, downloaded: Long, total: Long) {
+    private fun updateNotification(
+        version: String,
+        buildId: String,
+        downloaded: Long,
+        total: Long,
+        activeConnections: Int
+    ) {
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(version, buildId, downloaded, total))
+            .notify(
+                NOTIFICATION_ID,
+                buildNotification(version, buildId, downloaded, total, activeConnections)
+            )
     }
 
-    private fun buildNotification(version: String, buildId: String, downloaded: Long, total: Long) =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading Apple firmware")
-            .setContentText("$version ($buildId) — ${formatBytes(downloaded)} / ${formatBytes(total)}")
-            .setOnlyAlertOnce(true)
-            .setOngoing(true)
-            .setProgress(1000, if (total > 0) ((downloaded * 1000L) / total).toInt().coerceIn(0, 1000) else 0, total <= 0)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Cancel",
-                PendingIntent.getService(
-                    this,
-                    1,
-                    Intent(this, FirmwareDownloadService::class.java).setAction(ACTION_CANCEL),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
+    private fun buildNotification(
+        version: String,
+        buildId: String,
+        downloaded: Long,
+        total: Long,
+        activeConnections: Int
+    ) = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle("Downloading Apple firmware")
+        .setContentText(
+            buildString {
+                append("$version ($buildId) — ${formatBytes(downloaded)} / ${formatBytes(total)}")
+                if (activeConnections > 0) append(" • ${activeConnections}x")
+            }
+        )
+        .setOnlyAlertOnce(true)
+        .setOngoing(true)
+        .setProgress(
+            1000,
+            if (total > 0) ((downloaded * 1000L) / total).toInt().coerceIn(0, 1000) else 0,
+            total <= 0
+        )
+        .addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            "Cancel",
+            PendingIntent.getService(
+                this,
+                1,
+                Intent(this, FirmwareDownloadService::class.java).setAction(ACTION_CANCEL),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            .build()
+        )
+        .build()
 
     private fun fail(message: String) {
         broadcastState(STATE_FAILED, message = message)
@@ -169,6 +199,7 @@ class FirmwareDownloadService : Service() {
         downloaded: Long = 0L,
         total: Long = -1L,
         bytesPerSecond: Long = 0L,
+        activeConnections: Int = 0,
         message: String = ""
     ) {
         sendBroadcast(
@@ -178,6 +209,7 @@ class FirmwareDownloadService : Service() {
                 .putExtra(EXTRA_DOWNLOADED, downloaded)
                 .putExtra(EXTRA_TOTAL, total)
                 .putExtra(EXTRA_BYTES_PER_SECOND, bytesPerSecond)
+                .putExtra(EXTRA_ACTIVE_CONNECTIONS, activeConnections)
                 .putExtra(EXTRA_MESSAGE, message)
         )
     }
@@ -197,7 +229,10 @@ class FirmwareDownloadService : Service() {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         handle?.cancel()
-        broadcastState(STATE_FAILED, message = "Android foreground data-sync time limit reached; download can be resumed")
+        broadcastState(
+            STATE_FAILED,
+            message = "Android foreground data-sync time limit reached; download can be resumed"
+        )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(startId)
     }
@@ -219,6 +254,7 @@ class FirmwareDownloadService : Service() {
         const val EXTRA_DOWNLOADED = "downloaded"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_BYTES_PER_SECOND = "bytes_per_second"
+        const val EXTRA_ACTIVE_CONNECTIONS = "active_connections"
         const val EXTRA_MESSAGE = "message"
 
         const val STATE_RUNNING = "running"
@@ -229,11 +265,16 @@ class FirmwareDownloadService : Service() {
 
         private const val CHANNEL_ID = "firmware_downloads"
         private const val NOTIFICATION_ID = 4107
+        private const val MAX_ADAPTIVE_CONNECTIONS = 8
 
         fun formatBytes(value: Long): String {
             if (value < 0) return "unknown"
             val gib = value / (1024.0 * 1024.0 * 1024.0)
-            return if (gib >= 1.0) "%.2f GiB".format(gib) else "%.1f MiB".format(value / (1024.0 * 1024.0))
+            return if (gib >= 1.0) {
+                "%.2f GiB".format(gib)
+            } else {
+                "%.1f MiB".format(value / (1024.0 * 1024.0))
+            }
         }
     }
 }
