@@ -81,7 +81,7 @@ internal class AdaptiveRangeDownloader(
                 meta.delete()
                 metaTemp.delete()
                 part.delete()
-            } else if (part.exists() && originalPartLength > 0L && originalPartLength <= total) {
+            } else if (part.exists() && originalPartLength > 0L && originalPartLength < total) {
                 // Import older single-stream .part files without discarding already downloaded data.
                 // Only fully completed chunks are trusted; at most one trailing partial chunk is redownloaded.
                 for (index in completed.indices) {
@@ -94,7 +94,11 @@ internal class AdaptiveRangeDownloader(
                             "completed=${completed.count { it }}/$chunkCount"
                     )
                 }
-            } else if (part.exists() && originalPartLength > total) {
+            } else if (part.exists() && originalPartLength >= total) {
+                // A full-length untagged partial is ambiguous: an interrupted adaptive transfer may
+                // have preallocated it before metadata was durably committed. Restart instead of
+                // inferring completion from logical file length.
+                logger("FirmwareDownloader: untagged full-length partial is unsafe; restarting")
                 part.delete()
             }
         }
