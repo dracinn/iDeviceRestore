@@ -69,20 +69,28 @@ class FirmwareDownloadService : Service() {
             return
         }
 
-        val resumedBytes = File(destination.absolutePath + ".part")
-            .takeIf { it.isFile }
-            ?.length()
-            ?.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
-            ?: 0L
-        startAsForeground(version, buildId, resumedBytes, expectedSize)
+        val part = File(destination.absolutePath + ".part")
+        val adaptiveMeta = File(destination.absolutePath + ".part.meta")
+        // Adaptive .part files are preallocated to the final length, so their file length is not a
+        // valid resume-progress measurement. The first adaptive callback supplies the bitmap-derived
+        // completed byte count immediately after startup.
+        val resumedBytes = if (adaptiveMeta.isFile) {
+            0L
+        } else {
+            part.takeIf { it.isFile }
+                ?.length()
+                ?.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
+                ?: 0L
+        }
+        startAsForeground(version, buildId, resumedBytes, expectedSize, 0)
         broadcastState(
             STATE_RUNNING,
             downloaded = resumedBytes,
             total = expectedSize,
-            message = "Starting Apple CDN download"
+            message = "Starting adaptive Apple CDN download"
         )
 
-        val downloader = FirmwareDownloader(logger = { message ->
+        val downloader = AdaptiveFirmwareDownloader(logger = { message ->
             broadcastState(STATE_LOG, message = message)
         })
         val request = FirmwareDownloader.Request(
@@ -90,20 +98,27 @@ class FirmwareDownloadService : Service() {
             destination = destination,
             expectedSize = expectedSize,
             expectedSha1 = intent.getStringExtra(EXTRA_SHA1),
-            connections = 1
+            connections = MAX_ADAPTIVE_CONNECTIONS
         )
 
         val active = downloader.start(request) { progress ->
             val now = System.currentTimeMillis()
             if (now - lastUiUpdateMs.get() >= 500L && lastUiUpdateMs.getAndSet(now) <= now) {
-                updateNotification(version, buildId, progress.downloadedBytes, progress.totalBytes)
+                updateNotification(
+                    version,
+                    buildId,
+                    progress.downloadedBytes,
+                    progress.totalBytes,
+                    progress.activeConnections
+                )
                 // Progress is high-frequency UI state, not a diagnostic event. Keep the message empty
                 // so MainActivity updates progress/speed without appending the same log line every 500 ms.
                 broadcastState(
                     STATE_RUNNING,
                     downloaded = progress.downloadedBytes,
                     total = progress.totalBytes,
-                    bytesPerSecond = progress.bytesPerSecond
+                    bytesPerSecond = progress.bytesPerSecond,
+                    activeConnections = progress.activeConnections
                 )
             }
         }
@@ -140,43 +155,72 @@ class FirmwareDownloadService : Service() {
         }.start()
     }
 
-    private fun startAsForeground(version: String, buildId: String, downloaded: Long, total: Long) {
+    private fun startAsForeground(
+        version: String,
+        buildId: String,
+        downloaded: Long,
+        total: Long,
+        activeConnections: Int
+    ) {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification(version, buildId, downloaded, total),
+            buildNotification(version, buildId, downloaded, total, activeConnections),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         )
     }
 
-    private fun updateNotification(version: String, buildId: String, downloaded: Long, total: Long) {
+    private fun updateNotification(
+        version: String,
+        buildId: String,
+        downloaded: Long,
+        total: Long,
+        activeConnections: Int
+    ) {
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(version, buildId, downloaded, total))
+            .notify(
+                NOTIFICATION_ID,
+                buildNotification(version, buildId, downloaded, total, activeConnections)
+            )
     }
 
-    private fun buildNotification(version: String, buildId: String, downloaded: Long, total: Long) =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading Apple firmware")
-            .setContentText(
-                "$version ($buildId) — ${formatPercent(downloaded, total)} — " +
-                    "${formatBytes(downloaded)} / ${formatBytes(total)}"
+    private fun buildNotification(
+        version: String,
+        buildId: String,
+        downloaded: Long,
+        total: Long,
+        activeConnections: Int
+    ) = NotificationCompat.Builder(this, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle("Downloading Apple firmware")
+        .setContentText(
+            buildString {
+                append("$version ($buildId) — ${formatPercent(downloaded, total)} — ")
+                append("${formatBytes(downloaded)} / ${formatBytes(total)}")
+                if (activeConnections > 0) append(" — ${activeConnections}x")
+            }
+        )
+        .setSubText(
+            if (activeConnections > 0) {
+                "${formatPercent(downloaded, total)} • ${activeConnections} connection(s)"
+            } else {
+                formatPercent(downloaded, total)
+            }
+        )
+        .setOnlyAlertOnce(true)
+        .setOngoing(true)
+        .setProgress(1000, progressPermille(downloaded, total), total <= 0)
+        .addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            "Cancel",
+            PendingIntent.getService(
+                this,
+                1,
+                Intent(this, FirmwareDownloadService::class.java).setAction(ACTION_CANCEL),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            .setSubText(formatPercent(downloaded, total))
-            .setOnlyAlertOnce(true)
-            .setOngoing(true)
-            .setProgress(1000, progressPermille(downloaded, total), total <= 0)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Cancel",
-                PendingIntent.getService(
-                    this,
-                    1,
-                    Intent(this, FirmwareDownloadService::class.java).setAction(ACTION_CANCEL),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            )
-            .build()
+        )
+        .build()
 
     private fun fail(message: String) {
         broadcastState(STATE_FAILED, message = message)
@@ -188,6 +232,7 @@ class FirmwareDownloadService : Service() {
         downloaded: Long = 0L,
         total: Long = -1L,
         bytesPerSecond: Long = 0L,
+        activeConnections: Int = 0,
         message: String = ""
     ) {
         sendBroadcast(
@@ -197,6 +242,7 @@ class FirmwareDownloadService : Service() {
                 .putExtra(EXTRA_DOWNLOADED, downloaded)
                 .putExtra(EXTRA_TOTAL, total)
                 .putExtra(EXTRA_BYTES_PER_SECOND, bytesPerSecond)
+                .putExtra(EXTRA_ACTIVE_CONNECTIONS, activeConnections)
                 .putExtra(EXTRA_MESSAGE, message)
         )
     }
@@ -238,6 +284,7 @@ class FirmwareDownloadService : Service() {
         const val EXTRA_DOWNLOADED = "downloaded"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_BYTES_PER_SECOND = "bytes_per_second"
+        const val EXTRA_ACTIVE_CONNECTIONS = "active_connections"
         const val EXTRA_MESSAGE = "message"
 
         const val STATE_RUNNING = "running"
@@ -248,6 +295,7 @@ class FirmwareDownloadService : Service() {
 
         private const val CHANNEL_ID = "firmware_downloads"
         private const val NOTIFICATION_ID = 4107
+        private const val MAX_ADAPTIVE_CONNECTIONS = 8
 
         fun formatBytes(value: Long): String {
             if (value < 0) return "unknown"
