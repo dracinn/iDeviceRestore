@@ -17,7 +17,7 @@ object Stage1BuildMetadata {
         val modified: Long
     )
 
-    private val cache = ConcurrentHashMap<CacheKey, String?>()
+    private val cache = ConcurrentHashMap<CacheKey, String>()
     private val buildPattern = Regex("mBoot-[0-9]+(?:\\.[0-9]+){1,5}")
 
     fun expectedBuild(personalizedIbss: File): String? {
@@ -27,7 +27,12 @@ object Stage1BuildMetadata {
             length = personalizedIbss.length(),
             modified = personalizedIbss.lastModified()
         )
-        return cache.getOrPut(key) { extractUniqueBuild(personalizedIbss) }
+        val cached = cache[key]
+        if (cached != null) return cached.takeUnless { it == NO_BUILD }
+
+        val derived = extractUniqueBuild(personalizedIbss)
+        cache[key] = derived ?: NO_BUILD
+        return derived
     }
 
     private fun extractUniqueBuild(file: File): String? {
@@ -36,4 +41,6 @@ object Stage1BuildMetadata {
         val builds = buildPattern.findAll(text).map { it.value }.distinct().toList()
         return builds.singleOrNull()
     }
+
+    private const val NO_BUILD = "<none>"
 }
