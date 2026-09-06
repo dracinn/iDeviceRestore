@@ -5,13 +5,14 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Process-wide reservation for exclusive USB state-changing sequences.
  *
- * Automatic probes/watchdogs must remain read-only and back off while a reservation is held so
- * they cannot claim the same short-lived DFU/Recovery personality as an explicitly authorized
- * transition.
+ * Automatic probes/watchdogs must back off while a reservation is held so they cannot claim the
+ * same short-lived DFU/Recovery personality as an explicitly authorized transition. The worker
+ * thread that owns the lease may continue to open/claim each freshly re-enumerated USB device.
  */
 object UsbOperationReservation {
     data class Lease internal constructor(
         val owner: String,
+        internal val ownerThreadId: Long = Thread.currentThread().id,
         internal val token: Any = Any()
     )
 
@@ -30,6 +31,10 @@ object UsbOperationReservation {
     }
 
     fun isReserved(): Boolean = active.get() != null
+
+    fun isReservedByOtherThread(): Boolean = active.get()?.ownerThreadId?.let {
+        it != Thread.currentThread().id
+    } ?: false
 
     fun owner(): String? = active.get()?.owner
 }
