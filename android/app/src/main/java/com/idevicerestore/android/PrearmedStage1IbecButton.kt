@@ -158,6 +158,11 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
 
                 connection = usb.openDevice(dfu) ?: error("openDevice failed for DFU")
                 val claimed = AppleUsb.claimBestInterface(dfu, connection) ?: error("Could not claim DFU interface")
+                val resetCapability = AndroidUsbReset.capability(connection)
+                require(resetCapability.available) {
+                    "Android host USB reset is unavailable; refusing to send iBSS: ${resetCapability.reason}"
+                }
+                log(activity, "prearmed DFU preflight: Android host USB reset capability verified before iBSS upload")
                 val liveNonces = DfuNonceInfo.fromConnection(connection)
                 require(liveNonces.apNonce?.contentEquals(ticket.foundation.apNonce) == true) { "Live DFU ApNonce no longer matches TSS ticket" }
                 val expectedSepNonce = ticket.foundation.apSepNonce
