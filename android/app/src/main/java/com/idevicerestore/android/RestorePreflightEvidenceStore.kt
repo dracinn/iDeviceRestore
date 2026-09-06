@@ -73,6 +73,7 @@ object RestorePreflightEvidenceStore {
         val snapshot = snapshot()
         val current = snapshot.usbEvents.lastOrNull()
         val recovery = snapshot.recovery
+        val prearmedEvidence = PrearmedDiagnosticEvidenceStore.snapshot()
         return buildString {
             append("Preflight USB=").append(current?.state ?: "unknown")
             current?.previousStateDurationMs?.let { append(" transitionMs=").append(it) }
@@ -80,6 +81,12 @@ object RestorePreflightEvidenceStore {
                 append(" recoveryTransport=").append(if (recovery.commandTransportReady) "ready" else "not-confirmed")
                 append(" bootStage=").append(recovery.bootStage ?: "unknown")
                 append(" build=").append(recovery.buildVersion ?: "unknown")
+            }
+            if (prearmedEvidence.isNotEmpty()) {
+                appendLine()
+                appendLine("=== Pre-armed Diagnostic Evidence ===")
+                prearmedEvidence.forEach { appendLine(it) }
+                append("=== End Pre-armed Diagnostic Evidence ===")
             }
         }
     }
