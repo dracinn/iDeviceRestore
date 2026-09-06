@@ -35,6 +35,7 @@ internal class AdaptiveRangeDownloader(
         val destination = request.destination
         val part = File(destination.absolutePath + ".part")
         val meta = File(destination.absolutePath + ".part.meta")
+        val metaTemp = File(meta.absolutePath + ".tmp")
         val chunkSize = chooseChunkSize(total)
         val chunkCount = ceil(total.toDouble() / chunkSize.toDouble()).toInt().coerceAtLeast(1)
         val maxConnections = min(request.connections.coerceAtLeast(1), chunkCount)
@@ -45,13 +46,42 @@ internal class AdaptiveRangeDownloader(
         val originalPartLength = part.takeIf(File::exists)?.length() ?: 0L
         var resumed = false
 
-        val loaded = loadMeta(meta, request.url, total, chunkSize, completed)
-        if (loaded && part.exists()) {
+        val loadedPrimary = loadMeta(meta, request.url, total, chunkSize, completed)
+        val loadedTemp = if (!loadedPrimary) {
+            completed.fill(false)
+            loadMeta(metaTemp, request.url, total, chunkSize, completed)
+        } else {
+            false
+        }
+        val loaded = loadedPrimary || loadedTemp
+        val hadAdaptiveMetadata = meta.exists() || metaTemp.exists()
+
+        if (loaded && part.exists() && part.length() == total) {
+            if (loadedTemp) {
+                if (meta.exists() && !meta.delete()) {
+                    error("Could not replace stale adaptive metadata ${meta.absolutePath}")
+                }
+                if (!metaTemp.renameTo(meta)) {
+                    metaTemp.copyTo(meta, overwrite = true)
+                    metaTemp.delete()
+                }
+                logger("FirmwareDownloader: recovered adaptive resume metadata from temporary commit")
+            } else if (metaTemp.exists()) {
+                metaTemp.delete()
+            }
             resumed = completed.any { it }
             logger("FirmwareDownloader: adaptive resume metadata loaded; completed=${completed.count { it }}/$chunkCount")
         } else {
-            if (meta.exists()) meta.delete()
-            if (part.exists() && originalPartLength > 0L && originalPartLength <= total) {
+            if (hadAdaptiveMetadata) {
+                // Adaptive .part files are preallocated to the final length, so byte length alone can
+                // never prove which ranges are valid. If both committed and temporary metadata are
+                // unusable (or the payload was truncated), restart rather than treating the file as
+                // a fully-downloaded legacy sequential partial.
+                logger("FirmwareDownloader: adaptive resume metadata/payload mismatch; restarting safely")
+                meta.delete()
+                metaTemp.delete()
+                part.delete()
+            } else if (part.exists() && originalPartLength > 0L && originalPartLength <= total) {
                 // Import older single-stream .part files without discarding already downloaded data.
                 // Only fully completed chunks are trusted; at most one trailing partial chunk is redownloaded.
                 for (index in completed.indices) {
