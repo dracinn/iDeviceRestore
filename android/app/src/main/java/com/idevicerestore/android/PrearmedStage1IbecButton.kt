@@ -15,16 +15,14 @@ import java.io.FileInputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Pre-authorized bounded M1 diagnostic that removes the human reaction-time race between iBSS
- * re-enumeration and the PR #36 Recovery upload-init timing test.
- */
+/** Pre-authorized bounded M1 iBSS -> Stage-1 -> iBEC timing diagnostic. */
 class PrearmedStage1IbecButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
 ) : AppCompatButton(context, attrs) {
     private val worker = Executors.newSingleThreadExecutor()
     private val inFlight = AtomicBoolean(false)
+    private var replayedEvidenceSize = 0
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -42,6 +40,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         post(refresh)
+        post { replayPersistedEvidence() }
     }
 
     override fun onDetachedFromWindow() {
@@ -56,10 +55,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
             text = "Pre-armed test running…"
             return
         }
-        val activity = activity() ?: run {
-            isEnabled = false
-            return
-        }
+        val activity = activity() ?: run { isEnabled = false; return }
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
         val dfu = permittedDevice(usb, AppleUsb.Mode.DFU)
         val ids = dfu?.let(AppleUsb::bootIdentifiers)
@@ -72,22 +68,15 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         val ready = dfu != null &&
             ids?.cpidHex.equals(M1_CPID, true) &&
             ticket != null && foundationMatchesDevice(ticket.foundation, dfu) &&
-            ibss != null && ibss.result.file.isFile &&
-            ibss.result.file.length() == ibss.result.personalizedBytes &&
+            ibss != null && ibss.result.file.isFile && ibss.result.file.length() == ibss.result.personalizedBytes &&
             expectedStage1Build != null &&
-            preparedRestore != null && ibec?.personalizedFile?.isFile == true &&
-            ibec.personalizedBytes == ibec.personalizedFile.length() &&
-            buildId != null &&
-            ticket.buildId.equals(buildId, true) &&
-            preparedRestore.buildId.equals(buildId, true) &&
-            preparedRestore.identityIndex == ticket.identityIndex &&
-            ibss.result.identityIndex == ticket.identityIndex
+            preparedRestore != null && ibec?.personalizedFile?.isFile == true && ibec.personalizedBytes == ibec.personalizedFile.length() &&
+            buildId != null && ticket.buildId.equals(buildId, true) && preparedRestore.buildId.equals(buildId, true) &&
+            preparedRestore.identityIndex == ticket.identityIndex && ibss.result.identityIndex == ticket.identityIndex
         isEnabled = ready
         text = if (ready) READY_LABEL else if (ibss != null && expectedStage1Build == null) {
             "Prepared iBSS Stage-1 build unavailable"
-        } else {
-            READY_LABEL
-        }
+        } else READY_LABEL
     }
 
     private fun confirm() {
@@ -117,6 +106,8 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
         text = "Pre-armed test running…"
+        PrearmedDiagnosticEvidenceStore.begin(expectedStage1Build)
+        replayedEvidenceSize = 0
         setOperation(activity, "Pre-armed M1 iBSS → Stage-1 → iBEC diagnostic starting…", true)
         log(activity, "prearmed Stage-1 iBEC test: explicit user confirmation received; boundary=iBSS-then-iBEC-no-go expectedStage1Build=$expectedStage1Build")
 
@@ -144,7 +135,6 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 val ibec = restorePrepared.components.firstOrNull { it.name == "iBEC" } ?: error("Prepared iBEC unavailable")
                 val ibecFile = ibec.personalizedFile ?: error("Personalized iBEC unavailable")
                 val buildId = selectedBuildId(activity) ?: error("Selected build unavailable")
-
                 require(foundationMatchesDevice(ticket.foundation, dfu)) { "DFU device does not match TSS foundation" }
                 require(ticket.buildId.equals(buildId, true) && ticket.identityIndex == ibssPrepared.result.identityIndex) { "iBSS/TSS identity mismatch" }
                 require(restorePrepared.buildId.equals(buildId, true) && restorePrepared.identityIndex == ticket.identityIndex) { "iBEC/TSS identity mismatch" }
@@ -154,9 +144,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 connection = usb.openDevice(dfu) ?: error("openDevice failed for DFU")
                 val claimed = AppleUsb.claimBestInterface(dfu, connection) ?: error("Could not claim DFU interface")
                 val resetCapability = AndroidUsbReset.capability(connection)
-                require(resetCapability.available) {
-                    "Android host USB reset is unavailable; refusing to send iBSS: ${resetCapability.reason}"
-                }
+                require(resetCapability.available) { "Android host USB reset is unavailable; refusing to send iBSS: ${resetCapability.reason}" }
                 log(activity, "prearmed DFU preflight: Android host USB reset capability verified before iBSS upload")
                 val liveNonces = DfuNonceInfo.fromConnection(connection)
                 require(liveNonces.apNonce?.contentEquals(ticket.foundation.apNonce) == true) { "Live DFU ApNonce no longer matches TSS ticket" }
@@ -213,8 +201,8 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 setOperation(activity, "Pre-armed diagnostic stopped: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
                 connection?.close()
-                reservation?.let {
-                    runCatching { UsbOperationReservation.release(it) }
+                reservation?.let { lease ->
+                    runCatching { UsbOperationReservation.release(lease) }
                         .onSuccess { log(activity, "prearmed USB reservation released") }
                 }
                 inFlight.set(false)
@@ -251,9 +239,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                             if (stage == STAGE_1 && build == expectedStage1Build) return recovery
                         }
                     }
-                } finally {
-                    connection?.close()
-                }
+                } finally { connection?.close() }
             }
             Thread.sleep(STAGE1_POLL_MS)
         }
@@ -299,7 +285,21 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         }
     }
 
-    private fun log(activity: AppCompatActivity, message: String) = activity.runOnUiThread {
+    private fun log(activity: AppCompatActivity, message: String) {
+        PrearmedDiagnosticEvidenceStore.append(message)
+        deliverActivityLog(activity, message)
+    }
+
+    private fun replayPersistedEvidence() {
+        val activity = activity() ?: return
+        val evidence = PrearmedDiagnosticEvidenceStore.snapshot()
+        if (evidence.size <= replayedEvidenceSize) return
+        val start = replayedEvidenceSize.coerceAtMost(evidence.size)
+        evidence.subList(start, evidence.size).forEach { deliverActivityLog(activity, "[prearmed evidence] $it") }
+        replayedEvidenceSize = evidence.size
+    }
+
+    private fun deliverActivityLog(activity: AppCompatActivity, message: String) = activity.runOnUiThread {
         val delivered = runCatching {
             val method = activity.javaClass.getDeclaredMethod("log", String::class.java)
             method.isAccessible = true
