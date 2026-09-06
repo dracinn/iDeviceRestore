@@ -31,7 +31,9 @@ class RecoveryUploadTransport(
     data class Result(
         val bytesSent: Long,
         val packetsSent: Int,
-        val endpointAddress: Int
+        val endpointAddress: Int,
+        val initResult: Int? = null,
+        val initElapsedMs: Long? = null
     )
 
     data class InitAttempt(
@@ -114,7 +116,7 @@ class RecoveryUploadTransport(
         return sendBulkStream(
             input = input,
             length = length,
-            initEvidence = "initResult=${init.result} initElapsedMs=${init.elapsedMs}",
+            init = init,
             onProgress = onProgress
         )
     }
@@ -122,9 +124,10 @@ class RecoveryUploadTransport(
     private fun sendBulkStream(
         input: InputStream,
         length: Long,
-        initEvidence: String,
+        init: InitAttempt,
         onProgress: ((Progress) -> Unit)?
     ): Result {
+        val initEvidence = "initResult=${init.result} initElapsedMs=${init.elapsedMs}"
         val packet = ByteArray(RECOVERY_PACKET_SIZE)
         var remaining = length
         var sent = 0L
@@ -167,7 +170,13 @@ class RecoveryUploadTransport(
             onProgress?.invoke(Progress(sent, length, packetIndex))
         }
 
-        return Result(sent, packetIndex, bulkOut.address)
+        return Result(
+            bytesSent = sent,
+            packetsSent = packetIndex,
+            endpointAddress = bulkOut.address,
+            initResult = init.result,
+            initElapsedMs = init.elapsedMs
+        )
     }
 
     private fun readExactly(input: InputStream, buffer: ByteArray, length: Int) {
