@@ -3,6 +3,7 @@ package com.idevicerestore.android
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
+import android.os.SystemClock
 import java.io.ByteArrayInputStream
 import java.io.EOFException
 import java.io.IOException
@@ -33,6 +34,11 @@ class RecoveryUploadTransport(
         val endpointAddress: Int
     )
 
+    data class InitAttempt(
+        val result: Int,
+        val elapsedMs: Long
+    )
+
     init {
         require(bulkOut.direction == UsbConstants.USB_DIR_OUT) {
             "Recovery upload endpoint must be OUT"
@@ -46,16 +52,26 @@ class RecoveryUploadTransport(
         }
     }
 
+    /** Issues one libirecovery Recovery upload initialization request and records host wait time. */
+    fun initializeUploadTimed(): InitAttempt {
+        val started = SystemClock.elapsedRealtime()
+        val result = connection.controlTransfer(
+            LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
+            LIBIRECOVERY_UPLOAD_INIT_REQUEST,
+            0,
+            0,
+            null,
+            0,
+            USB_TIMEOUT_MS
+        )
+        return InitAttempt(
+            result = result,
+            elapsedMs = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+        )
+    }
+
     /** Issues one libirecovery Recovery upload initialization request; no bulk bytes are sent. */
-    fun initializeUpload(): Int = connection.controlTransfer(
-        LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
-        LIBIRECOVERY_UPLOAD_INIT_REQUEST,
-        0,
-        0,
-        null,
-        0,
-        USB_TIMEOUT_MS
-    )
+    fun initializeUpload(): Int = initializeUploadTimed().result
 
     /** Uploads an in-memory component using libirecovery's 0x8000-byte Recovery packet size. */
     fun sendBuffer(
@@ -66,10 +82,10 @@ class RecoveryUploadTransport(
     /**
      * Streams exactly [length] bytes to iBoot over Recovery bulk endpoint 0x04.
      *
-     * Upstream libirecovery issues a zero-length 0x41/0 control-OUT request and then immediately
-     * attempts the first 0x8000-byte bulk packet on the same open USB client. The control-transfer
-     * result is not treated as the final upload verdict because some hosts can report an error while
-     * the device has already acted on the request. The first bulk transfer is therefore authoritative.
+     * Current upstream libirecovery issues the zero-length 0x41/0 control-OUT request first and
+     * returns an upload error if that initialization fails. Bulk transfer begins only after a
+     * successful init. We preserve that strict gate here while recording Android's synchronous
+     * control-transfer duration so Stage-1 timing differences can be diagnosed without guessing.
      */
     fun sendStream(
         input: InputStream,
@@ -82,8 +98,25 @@ class RecoveryUploadTransport(
             return Result(0, 0, bulkOut.address)
         }
 
-        val initResult = initializeUpload()
-        return sendBulkStream(input, length, "initResult=$initResult", onProgress)
+        val init = initializeUploadTimed()
+        if (init.result < 0) {
+            throw IOException(
+                "Recovery upload initialization failed: type=0x%02X request=0x%02X value=0 index=0 timeoutMs=%d result=%d initElapsedMs=%d; zero bulk bytes sent"
+                    .format(
+                        LIBIRECOVERY_UPLOAD_INIT_REQUEST_TYPE,
+                        LIBIRECOVERY_UPLOAD_INIT_REQUEST,
+                        USB_TIMEOUT_MS,
+                        init.result,
+                        init.elapsedMs
+                    )
+            )
+        }
+        return sendBulkStream(
+            input = input,
+            length = length,
+            initEvidence = "initResult=${init.result} initElapsedMs=${init.elapsedMs}",
+            onProgress = onProgress
+        )
     }
 
     private fun sendBulkStream(
