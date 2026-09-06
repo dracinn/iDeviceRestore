@@ -3,7 +3,6 @@ package com.idevicerestore.android
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -15,11 +14,11 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
 /**
- * Resumable HTTP(S) firmware downloader inspired by aria2's transfer behavior:
- * ranged requests, multiple connections, retries, progress, cancellation and checksum verification.
+ * Resumable HTTPS firmware downloader.
  *
- * This is deliberately a Kotlin framework rather than a bundled aria2 binary so it can share
- * Android storage and lifecycle policy with the restore app. It only downloads normal HTTPS URLs.
+ * When the server supports byte ranges and a payload size is known, downloads use an adaptive
+ * multi-connection engine that writes every range directly into one preallocated .part file.
+ * This avoids the old segment-assembly disk penalty while preserving resumability.
  */
 class FirmwareDownloader(
     private val logger: (String) -> Unit = {}
@@ -29,6 +28,7 @@ class FirmwareDownloader(
         val destination: File,
         val expectedSize: Long = -1L,
         val expectedSha1: String? = null,
+        /** Maximum adaptive connection count. The transfer starts lower and scales dynamically. */
         val connections: Int = 4,
         val maxRetries: Int = 5,
         val connectTimeoutMs: Int = 15_000,
@@ -98,22 +98,34 @@ class FirmwareDownloader(
             else -> -1L
         }
         if (request.expectedSize > 0 && probe.length > 0 && request.expectedSize != probe.length) {
-            logger("FirmwareDownloader: size metadata=${request.expectedSize}, server=${probe.length}; using metadata for verification")
+            logger(
+                "FirmwareDownloader: size metadata=${request.expectedSize}, server=${probe.length}; " +
+                    "using metadata for verification"
+            )
         }
 
-        val canSegment = probe.ranges && total > 0 && request.connections > 1
+        val adaptive = probe.ranges && total > 0L && request.connections > 1
         logger("FirmwareDownloader: url=${request.url}")
         logger("FirmwareDownloader: destination=${request.destination.absolutePath}")
-        logger("FirmwareDownloader: total=$total rangeSupport=${probe.ranges} connections=${if (canSegment) request.connections else 1}")
+        logger(
+            "FirmwareDownloader: total=$total rangeSupport=${probe.ranges} " +
+                "mode=${if (adaptive) "adaptive-range" else "sequential"} maxConnections=${if (adaptive) request.connections else 1}"
+        )
 
-        val result = if (canSegment) {
-            segmentedDownload(request, total, cancelled, onProgress)
+        val transferFile: File
+        val resumed: Boolean
+        if (adaptive) {
+            val result = AdaptiveRangeDownloader(logger).download(request, total, cancelled, onProgress)
+            transferFile = result.file
+            resumed = result.resumed
         } else {
-            sequentialDownload(request, total, cancelled, onProgress)
+            val result = sequentialDownload(request, total, cancelled, onProgress)
+            transferFile = result.first
+            resumed = result.second
         }
         if (cancelled.get()) throw InterruptedException("Download cancelled")
 
-        val actualSize = result.first.length()
+        val actualSize = transferFile.length()
         if (request.expectedSize > 0 && actualSize != request.expectedSize) {
             error("Firmware size mismatch: expected ${request.expectedSize}, got $actualSize")
         }
@@ -122,7 +134,7 @@ class FirmwareDownloader(
         }
 
         logger("FirmwareDownloader: verifying SHA-1 over $actualSize bytes")
-        val sha1 = sha1(result.first, cancelled)
+        val sha1 = sha1(transferFile, cancelled)
         request.expectedSha1?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { expected ->
             if (sha1 != expected) error("SHA-1 mismatch: expected $expected, got $sha1")
             logger("FirmwareDownloader: SHA-1 verified: $sha1")
@@ -131,13 +143,19 @@ class FirmwareDownloader(
         if (request.destination.exists() && !request.destination.delete()) {
             error("Could not replace ${request.destination.absolutePath}")
         }
-        if (!result.first.renameTo(request.destination)) {
-            result.first.copyTo(request.destination, overwrite = true)
-            result.first.delete()
+        if (!transferFile.renameTo(request.destination)) {
+            transferFile.copyTo(request.destination, overwrite = true)
+            transferFile.delete()
         }
-        cleanupSegments(request.destination)
+        cleanupResumeMetadata(request.destination)
         logger("FirmwareDownloader: complete ${request.destination.absolutePath}")
-        return Result(request.destination, request.destination.length(), sha1, result.second, canSegment)
+        return Result(
+            file = request.destination,
+            bytes = request.destination.length(),
+            sha1 = sha1,
+            resumed = resumed,
+            segmented = adaptive
+        )
     }
 
     private fun sequentialDownload(
@@ -147,6 +165,15 @@ class FirmwareDownloader(
         onProgress: (Progress) -> Unit
     ): Pair<File, Boolean> {
         val part = File(request.destination.absolutePath + ".part")
+        val meta = File(request.destination.absolutePath + ".part.meta")
+        if (meta.exists()) {
+            // Adaptive metadata means file length may already equal the final payload size even when
+            // ranges are missing. Never interpret that preallocated file as a sequential resume.
+            logger("FirmwareDownloader: range resume metadata exists but server is sequential; restarting .part")
+            meta.delete()
+            part.delete()
+        }
+
         var offset = part.takeIf { it.exists() }?.length() ?: 0L
         val resumed = offset > 0
         if (total > 0 && offset > total) {
@@ -193,87 +220,6 @@ class FirmwareDownloader(
         return part to resumed
     }
 
-    private fun segmentedDownload(
-        request: Request,
-        total: Long,
-        cancelled: AtomicBoolean,
-        onProgress: (Progress) -> Unit
-    ): Pair<File, Boolean> {
-        val count = min(request.connections, maxOf(1, (total / (4L * 1024 * 1024)).toInt()))
-        val chunk = (total + count - 1) / count
-        val parts = (0 until count).map { index -> File(request.destination.absolutePath + ".part.$index") }
-        val resumed = parts.any { it.exists() && it.length() > 0 }
-        val initialBytes = parts.sumOf { it.takeIf(File::exists)?.length() ?: 0L }
-        val downloaded = AtomicLong(initialBytes)
-        val startedAt = System.nanoTime()
-        val pool = Executors.newFixedThreadPool(count)
-        logger("FirmwareDownloader: segmented transfer count=$count chunk=$chunk resumed=$resumed")
-
-        try {
-            val futures = mutableListOf<Future<*>>()
-            for (index in 0 until count) {
-                val start = index * chunk
-                val end = min(total - 1, start + chunk - 1)
-                val part = parts[index]
-                if (part.length() > end - start + 1) part.delete()
-                futures += pool.submit {
-                    val existing = part.takeIf(File::exists)?.length() ?: 0L
-                    if (start + existing > end) return@submit
-                    retry(request.maxRetries, cancelled) { attempt ->
-                        var connection: HttpURLConnection? = null
-                        try {
-                            val rangeStart = start + part.length()
-                            if (rangeStart > end) return@retry
-                            connection = open(request.url, request, "GET")
-                            connection.setRequestProperty("Range", "bytes=$rangeStart-$end")
-                            val code = connection.responseCode
-                            if (code != 206) error("Segment $index expected HTTP 206, got $code")
-                            logger("FirmwareDownloader: segment=$index range=$rangeStart-$end attempt=${attempt + 1}")
-                            FileOutputStream(part, true).use { output ->
-                                connection.inputStream.use { input ->
-                                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
-                                    while (true) {
-                                        checkCancelled(cancelled)
-                                        val read = input.read(buffer)
-                                        if (read < 0) break
-                                        output.write(buffer, 0, read)
-                                        val now = downloaded.addAndGet(read.toLong())
-                                        emitProgress(now, total, startedAt, count, onProgress)
-                                    }
-                                    output.fd.sync()
-                                }
-                            }
-                            val expected = end - start + 1
-                            if (part.length() != expected) error("Segment $index incomplete: ${part.length()}/$expected")
-                            return@retry
-                        } finally {
-                            connection?.disconnect()
-                        }
-                    }
-                }
-            }
-            futures.forEach { it.get() }
-        } catch (t: Throwable) {
-            cancelled.set(cancelled.get() || t is InterruptedException)
-            throw t
-        } finally {
-            pool.shutdownNow()
-        }
-
-        val assembled = File(request.destination.absolutePath + ".part")
-        if (assembled.exists()) assembled.delete()
-        FileOutputStream(assembled).use { output ->
-            parts.forEachIndexed { index, part ->
-                checkCancelled(cancelled)
-                logger("FirmwareDownloader: assembling segment=$index bytes=${part.length()}")
-                FileInputStream(part).use { it.copyTo(output, DEFAULT_BUFFER_SIZE * 16) }
-            }
-            output.fd.sync()
-        }
-        parts.forEach { it.delete() }
-        return assembled to resumed
-    }
-
     private fun probe(request: Request): Probe {
         var connection: HttpURLConnection? = null
         return try {
@@ -281,7 +227,8 @@ class FirmwareDownloader(
             val code = connection.responseCode
             if (code !in 200..399) error("Firmware probe HTTP $code")
             val length = connection.getHeaderFieldLong("Content-Length", -1L)
-            val acceptRanges = connection.getHeaderField("Accept-Ranges")?.contains("bytes", ignoreCase = true) == true
+            val acceptRanges = connection.getHeaderField("Accept-Ranges")
+                ?.contains("bytes", ignoreCase = true) == true
             if (acceptRanges) Probe(length, true) else rangeProbe(request, length)
         } catch (t: Throwable) {
             logger("FirmwareDownloader: HEAD probe failed: ${t.message}; trying range probe")
@@ -302,7 +249,7 @@ class FirmwareDownloader(
                 ?: connection.getHeaderFieldLong("Content-Length", fallbackLength)
             Probe(length, code == 206)
         } finally {
-            connection?.inputStream?.close()
+            runCatching { connection?.inputStream?.close() }
             connection?.disconnect()
         }
     }
@@ -329,7 +276,10 @@ class FirmwareDownloader(
                 last = t
                 if (attempt >= maxRetries) break
                 val delayMs = min(30_000L, 1_000L shl min(attempt, 5))
-                logger("FirmwareDownloader: attempt ${attempt + 1} failed: ${t.javaClass.simpleName}: ${t.message}; retry in ${delayMs}ms")
+                logger(
+                    "FirmwareDownloader: attempt ${attempt + 1} failed: ${t.javaClass.simpleName}: " +
+                        "${t.message}; retry in ${delayMs}ms"
+                )
                 var remaining = delayMs
                 while (remaining > 0) {
                     checkCancelled(cancelled)
@@ -367,13 +317,17 @@ class FirmwareDownloader(
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun cleanupSegments(destination: File) {
+    private fun cleanupResumeMetadata(destination: File) {
+        File(destination.absolutePath + ".part.meta").delete()
+        File(destination.absolutePath + ".part.meta.tmp").delete()
         destination.parentFile?.listFiles()?.filter {
             it.name.startsWith(destination.name + ".part.")
         }?.forEach { it.delete() }
     }
 
     private fun checkCancelled(cancelled: AtomicBoolean) {
-        if (cancelled.get() || Thread.currentThread().isInterrupted) throw InterruptedException("Download cancelled")
+        if (cancelled.get() || Thread.currentThread().isInterrupted) {
+            throw InterruptedException("Download cancelled")
+        }
     }
 }
