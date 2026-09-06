@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Environment
 import java.io.File
+import kotlin.math.ceil
+import kotlin.math.min
 
 /**
  * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
@@ -117,7 +119,56 @@ class FirmwareStorage(
 
     fun partialBytes(firmware: FirmwareCatalog.Firmware): Long {
         val destination = locationFor(firmware).file
-        return partialFiles(destination).sumOf { it.length() }
+        val part = File(destination.absolutePath + ".part")
+        if (!part.isFile) return 0L
+
+        adaptivePartialBytes(destination)?.let { return it }
+
+        val hasAdaptiveMetadata = File(destination.absolutePath + ".part.meta").exists() ||
+            File(destination.absolutePath + ".part.meta.tmp").exists()
+        if (hasAdaptiveMetadata) {
+            logger("FirmwareStorage: adaptive partial metadata invalid; reporting zero trusted bytes")
+            return 0L
+        }
+
+        // A full-length untagged .part is ambiguous because adaptive transfers preallocate their
+        // payload. Never treat logical length alone as completed data for free-space calculations.
+        if (firmware.fileSize > 0L && part.length() >= firmware.fileSize) return 0L
+        return part.length()
+    }
+
+    private fun adaptivePartialBytes(destination: File): Long? {
+        val part = File(destination.absolutePath + ".part")
+        val candidates = listOf(
+            File(destination.absolutePath + ".part.meta"),
+            File(destination.absolutePath + ".part.meta.tmp")
+        )
+        for (meta in candidates) {
+            if (!meta.isFile) continue
+            val parsed = runCatching {
+                val lines = meta.readLines()
+                if (lines.firstOrNull() != "version=1") return@runCatching null
+                val total = lines.find { it.startsWith("size=") }
+                    ?.substringAfter("size=")?.toLongOrNull() ?: return@runCatching null
+                val chunk = lines.find { it.startsWith("chunk=") }
+                    ?.substringAfter("chunk=")?.toLongOrNull() ?: return@runCatching null
+                val bits = lines.find { it.startsWith("completed=") }
+                    ?.substringAfter("completed=") ?: return@runCatching null
+                if (total <= 0L || chunk <= 0L || !part.isFile || part.length() != total) return@runCatching null
+                val expectedChunks = ceil(total.toDouble() / chunk.toDouble()).toInt().coerceAtLeast(1)
+                if (bits.length != expectedChunks || bits.any { it != '0' && it != '1' }) return@runCatching null
+                bits.indices.sumOf { index ->
+                    if (bits[index] != '1') 0L
+                    else {
+                        val start = index * chunk
+                        val endExclusive = min(total, start + chunk)
+                        endExclusive - start
+                    }
+                }
+            }.getOrNull()
+            if (parsed != null) return parsed
+        }
+        return null
     }
 
     fun removePartial(firmware: FirmwareCatalog.Firmware): Int {
