@@ -54,10 +54,6 @@ object AppleUsb {
         else -> Personality.APPLE_OTHER
     }
 
-    /**
-     * Existing operational modes intentionally exclude Port DFU and KIS. Those newer identities
-     * are discovery-only until their transports are implemented and hardware-tested.
-     */
     fun mode(device: UsbDevice): Mode = when (personality(device)) {
         Personality.DFU -> Mode.DFU
         Personality.RECOVERY -> Mode.RECOVERY
@@ -69,9 +65,7 @@ object AppleUsb {
         val personality = personality(device)
         append("VID=%04x PID=%04x".format(device.vendorId, device.productId))
         append(" mode=${mode(device)}")
-        if (personality == Personality.PORT_DFU || personality == Personality.KIS) {
-            append(" personality=$personality")
-        }
+        if (personality == Personality.PORT_DFU || personality == Personality.KIS) append(" personality=$personality")
         append(" interfaces=${device.interfaceCount}")
         runCatching { device.productName }.getOrNull()?.let { append(" product=$it") }
         runCatching { device.manufacturerName }.getOrNull()?.let { append(" manufacturer=$it") }
@@ -79,41 +73,16 @@ object AppleUsb {
 
     fun bootIdentifiers(device: UsbDevice): BootIdentifiers? {
         val serial = runCatching { device.serialNumber }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
-        val values = bootIdRegex.findAll(serial)
-            .associate { it.groupValues[1].uppercase() to it.groupValues[2].uppercase() }
-        return BootIdentifiers(
-            rawSerial = serial,
-            cpidHex = values["CPID"],
-            cprvHex = values["CPRV"],
-            cpfmHex = values["CPFM"],
-            scepHex = values["SCEP"],
-            bdidHex = values["BDID"],
-            ecidHex = values["ECID"],
-            ibflHex = values["IBFL"],
-            prevHex = values["PREV"]
-        )
+        val values = bootIdRegex.findAll(serial).associate { it.groupValues[1].uppercase() to it.groupValues[2].uppercase() }
+        return BootIdentifiers(serial, values["CPID"], values["CPRV"], values["CPFM"], values["SCEP"], values["BDID"], values["ECID"], values["IBFL"], values["PREV"])
     }
 
     fun bootIdentifierSummary(device: UsbDevice): String {
         val identifiers = bootIdentifiers(device)
-            ?: return if (runCatching { device.serialNumber }.getOrNull().isNullOrBlank()) {
-                "USB serial descriptor: unavailable"
-            } else {
-                "USB serial descriptor: empty"
-            }
-
+            ?: return if (runCatching { device.serialNumber }.getOrNull().isNullOrBlank()) "USB serial descriptor: unavailable" else "USB serial descriptor: empty"
         return buildString {
             append("USB serial descriptor: ").append(identifiers.rawSerial)
-            val entries = listOf(
-                "CPID" to identifiers.cpidHex,
-                "CPRV" to identifiers.cprvHex,
-                "CPFM" to identifiers.cpfmHex,
-                "SCEP" to identifiers.scepHex,
-                "BDID" to identifiers.bdidHex,
-                "ECID" to identifiers.ecidHex,
-                "IBFL" to identifiers.ibflHex,
-                "PREV" to identifiers.prevHex
-            ).filter { it.second != null }
+            val entries = listOf("CPID" to identifiers.cpidHex, "CPRV" to identifiers.cprvHex, "CPFM" to identifiers.cpfmHex, "SCEP" to identifiers.scepHex, "BDID" to identifiers.bdidHex, "ECID" to identifiers.ecidHex, "IBFL" to identifiers.ibflHex, "PREV" to identifiers.prevHex).filter { it.second != null }
             if (entries.isNotEmpty()) {
                 append("\nBoot identifiers:")
                 entries.forEach { (key, value) -> append(" $key=$value") }
@@ -125,11 +94,7 @@ object AppleUsb {
     fun interfaceSummary(device: UsbDevice): String = buildString {
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
-            append(
-                "ifIndex=$i id=${intf.id} alt=${intf.alternateSetting} " +
-                    "class=${intf.interfaceClass} subclass=${intf.interfaceSubclass} " +
-                    "protocol=${intf.interfaceProtocol} endpoints=${intf.endpointCount}\n"
-            )
+            append("ifIndex=$i id=${intf.id} alt=${intf.alternateSetting} class=${intf.interfaceClass} subclass=${intf.interfaceSubclass} protocol=${intf.interfaceProtocol} endpoints=${intf.endpointCount}\n")
             for (e in 0 until intf.endpointCount) {
                 val ep = intf.getEndpoint(e)
                 val dir = if (ep.direction == UsbConstants.USB_DIR_IN) "IN" else "OUT"
@@ -145,28 +110,17 @@ object AppleUsb {
         }
     }
 
-    data class Claimed(
-        val intf: UsbInterface,
-        val bulkIn: UsbEndpoint?,
-        val bulkOut: UsbEndpoint?
-    )
-
-    private data class Candidate(
-        val intf: UsbInterface,
-        val bulkIn: UsbEndpoint?,
-        val bulkOut: UsbEndpoint?,
-        val score: Int
-    )
+    data class Claimed(val intf: UsbInterface, val bulkIn: UsbEndpoint?, val bulkOut: UsbEndpoint?)
+    private data class Candidate(val intf: UsbInterface, val bulkIn: UsbEndpoint?, val bulkOut: UsbEndpoint?, val score: Int)
 
     fun claimBestInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
+        if (UsbOperationReservation.isReservedByOtherThread()) return null
         val candidates = mutableListOf<Candidate>()
         val personality = personality(device)
-
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
             var bulkIn: UsbEndpoint? = null
             var bulkOut: UsbEndpoint? = null
-
             for (e in 0 until intf.endpointCount) {
                 val ep = intf.getEndpoint(e)
                 if (ep.type != UsbConstants.USB_ENDPOINT_XFER_BULK) continue
@@ -175,55 +129,22 @@ object AppleUsb {
                     UsbConstants.USB_DIR_OUT -> if (bulkOut == null) bulkOut = ep
                 }
             }
-
             val score = when (personality) {
-                Personality.RECOVERY -> {
-                    var s = 0
-                    if (intf.id == 0) s += 500
-                    if (intf.alternateSetting == 0) s += 100
-                    if (bulkIn != null) s += 20
-                    if (bulkOut != null) s += 10
-                    s
-                }
-                Personality.WTF, Personality.DFU, Personality.PORT_DFU -> {
-                    var s = 0
-                    if (intf.id == 0) s += 200
-                    if (intf.alternateSetting == 0) s += 100
-                    if (intf.interfaceClass == 254) s += 100
-                    if (intf.interfaceSubclass == 1) s += 50
-                    if (intf.endpointCount == 0) s += 10
-                    s
-                }
-                Personality.KIS, Personality.APPLE_OTHER -> {
-                    var s = 0
-                    if (intf.id == 0) s += 100
-                    if (intf.alternateSetting == 0) s += 50
-                    if (bulkIn != null) s += 20
-                    if (bulkOut != null) s += 10
-                    s
-                }
+                Personality.RECOVERY -> { var s = 0; if (intf.id == 0) s += 500; if (intf.alternateSetting == 0) s += 100; if (bulkIn != null) s += 20; if (bulkOut != null) s += 10; s }
+                Personality.WTF, Personality.DFU, Personality.PORT_DFU -> { var s = 0; if (intf.id == 0) s += 200; if (intf.alternateSetting == 0) s += 100; if (intf.interfaceClass == 254) s += 100; if (intf.interfaceSubclass == 1) s += 50; if (intf.endpointCount == 0) s += 10; s }
+                Personality.KIS, Personality.APPLE_OTHER -> { var s = 0; if (intf.id == 0) s += 100; if (intf.alternateSetting == 0) s += 50; if (bulkIn != null) s += 20; if (bulkOut != null) s += 10; s }
             }
-
             candidates += Candidate(intf, bulkIn, bulkOut, score)
         }
-
         for (candidate in candidates.sortedByDescending { it.score }) {
-            if (connection.claimInterface(candidate.intf, true)) {
-                return Claimed(candidate.intf, candidate.bulkIn, candidate.bulkOut)
-            }
+            if (connection.claimInterface(candidate.intf, true)) return Claimed(candidate.intf, candidate.bulkIn, candidate.bulkOut)
         }
-
         return null
     }
 
-    /**
-     * Claims a secondary Recovery alternate setting that exposes a bulk-IN endpoint.
-     * The primary iBoot command/control interface remains interface 0/alt 0.
-     * This helper is diagnostic/read-only and is not used for firmware upload.
-     */
     fun claimRecoveryConsoleInterface(device: UsbDevice, connection: UsbDeviceConnection): Claimed? {
+        if (UsbOperationReservation.isReservedByOtherThread()) return null
         if (mode(device) != Mode.RECOVERY) return null
-
         val candidates = mutableListOf<Candidate>()
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
@@ -244,7 +165,6 @@ object AppleUsb {
             if (bulkOut != null) score += 10
             candidates += Candidate(intf, bulkIn, bulkOut, score)
         }
-
         for (candidate in candidates.sortedByDescending { it.score }) {
             if (!connection.claimInterface(candidate.intf, true)) continue
             if (candidate.intf.alternateSetting != 0 && !connection.setInterface(candidate.intf)) {
