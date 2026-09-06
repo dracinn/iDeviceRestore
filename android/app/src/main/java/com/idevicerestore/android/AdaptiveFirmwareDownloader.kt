@@ -49,6 +49,7 @@ internal class AdaptiveFirmwareDownloader(
         }
 
         if (!probe.ranges || total <= 0L || request.connections <= 1) {
+            discardUnsafeAdaptivePartialBeforeSequentialFallback(request, total)
             logger("FirmwareDownloader: adaptive mode unavailable; using current sequential downloader")
             return FirmwareDownloader(logger).download(
                 request.copy(connections = 1),
@@ -114,6 +115,29 @@ internal class AdaptiveFirmwareDownloader(
             resumed = transfer.resumed,
             segmented = true
         )
+    }
+
+    private fun discardUnsafeAdaptivePartialBeforeSequentialFallback(
+        request: FirmwareDownloader.Request,
+        total: Long
+    ) {
+        val part = File(request.destination.absolutePath + ".part")
+        val meta = File(request.destination.absolutePath + ".part.meta")
+        val metaTemp = File(request.destination.absolutePath + ".part.meta.tmp")
+        val hasAdaptiveMetadata = meta.exists() || metaTemp.exists()
+        val ambiguousFullLengthPart = total > 0L && part.isFile && part.length() == total
+        if (!hasAdaptiveMetadata && !ambiguousFullLengthPart) return
+
+        // Adaptive downloads preallocate .part to the final length. The sequential downloader uses
+        // length as proof of downloaded bytes, so an adaptive or otherwise ambiguous full-length
+        // partial must never be handed to it. Prefer a safe restart over promoting sparse data.
+        val removedPart = !part.exists() || part.delete()
+        val removedMeta = !meta.exists() || meta.delete()
+        val removedTemp = !metaTemp.exists() || metaTemp.delete()
+        check(removedPart && removedMeta && removedTemp) {
+            "Could not clear adaptive partial before sequential fallback"
+        }
+        logger("FirmwareDownloader: cleared adaptive/ambiguous partial before sequential fallback")
     }
 
     private data class Probe(val length: Long, val ranges: Boolean)
