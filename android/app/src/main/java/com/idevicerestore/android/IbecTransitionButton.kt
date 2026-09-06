@@ -346,7 +346,11 @@ class IbecTransitionButton @JvmOverloads constructor(
                 log(
                     activity,
                     "iBEC atomic upload COMPLETE: bytes=${result.bytesSent} packets=${result.packetsSent} " +
-                        "endpoint=0x%02x".format(result.endpointAddress)
+                        "endpoint=0x%02x initResult=%s initElapsedMs=%s".format(
+                            result.endpointAddress,
+                            result.initResult?.toString() ?: "unknown",
+                            result.initElapsedMs?.toString() ?: "unknown"
+                        )
                 )
                 log(
                     activity,
