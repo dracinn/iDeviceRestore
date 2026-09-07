@@ -15,7 +15,7 @@ import java.io.FileInputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Pre-authorized bounded M1 iBSS -> Stage-1 -> iBEC timing diagnostic. */
+/** Pre-authorized bounded M1 iBSS -> Stage-1 -> iBEC -> Stage-2 diagnostic. */
 class PrearmedStage1IbecButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
@@ -64,19 +64,25 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         val expectedStage1Build = ibss?.result?.file?.let(Stage1BuildMetadata::expectedBuild)
         val preparedRestore = RestoreComponentPreparationStore.get()
         val ibec = preparedRestore?.components?.firstOrNull { it.name == "iBEC" }
+        val ibecFile = ibec?.personalizedFile
+        val expectedStage2Build = ibecFile?.let(Stage1BuildMetadata::expectedBuild)
         val buildId = selectedBuildId(activity)
         val ready = dfu != null &&
             ids?.cpidHex.equals(M1_CPID, true) &&
             ticket != null && foundationMatchesDevice(ticket.foundation, dfu) &&
             ibss != null && ibss.result.file.isFile && ibss.result.file.length() == ibss.result.personalizedBytes &&
             expectedStage1Build != null &&
-            preparedRestore != null && ibec?.personalizedFile?.isFile == true && ibec.personalizedBytes == ibec.personalizedFile.length() &&
+            preparedRestore != null && ibecFile?.isFile == true && ibec.personalizedBytes == ibecFile.length() &&
+            expectedStage2Build != null &&
             buildId != null && ticket.buildId.equals(buildId, true) && preparedRestore.buildId.equals(buildId, true) &&
             preparedRestore.identityIndex == ticket.identityIndex && ibss.result.identityIndex == ticket.identityIndex
         isEnabled = ready
-        text = if (ready) READY_LABEL else if (ibss != null && expectedStage1Build == null) {
-            "Prepared iBSS Stage-1 build unavailable"
-        } else READY_LABEL
+        text = when {
+            ready -> READY_LABEL
+            ibss != null && expectedStage1Build == null -> "Prepared iBSS Stage-1 build unavailable"
+            ibecFile != null && expectedStage2Build == null -> "Prepared iBEC Stage-2 build unavailable"
+            else -> READY_LABEL
+        }
     }
 
     private fun confirm() {
@@ -86,30 +92,43 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         val expectedStage1Build = Stage1BuildMetadata.expectedBuild(preparedIbss.result.file) ?: run {
             isEnabled = false
             text = "Prepared iBSS Stage-1 build unavailable"
-            log(activity, "prearmed Stage-1 iBEC test blocked: prepared iBSS has no unique embedded mBoot build identifier")
+            log(activity, "prearmed Stage-2 test blocked: prepared iBSS has no unique embedded mBoot build identifier")
             return
         }
+        val preparedRestore = RestoreComponentPreparationStore.get() ?: return
+        val ibecFile = preparedRestore.components.firstOrNull { it.name == "iBEC" }?.personalizedFile ?: return
+        val expectedStage2Build = Stage1BuildMetadata.expectedBuild(ibecFile) ?: run {
+            isEnabled = false
+            text = "Prepared iBEC Stage-2 build unavailable"
+            log(activity, "prearmed Stage-2 test blocked: prepared iBEC has no unique embedded mBoot build identifier")
+            return
+        }
+
         AlertDialog.Builder(activity)
-            .setTitle("Pre-arm iBSS → Stage-1 → iBEC test?")
+            .setTitle("Pre-arm iBSS → iBEC → Stage-2 test?")
             .setMessage(
-                "This single confirmation authorizes two bounded boot-state changes so the app can act inside the short custom Stage-1 window without another tap. " +
-                    "It will upload the validated personalized iBSS, wait for Recovery, require boot-stage=1 and firmware-derived build-version=$expectedStage1Build, then issue the 0x41/0 iBEC upload initialization. " +
-                    "If initialization fails, zero iBEC bulk bytes are sent. If it succeeds, only the personalized iBEC is uploaded. The test never sends 'go', RestoreRamDisk, SEP, DeviceTree, KernelCache, or starts restore/erase sequencing."
+                "This single confirmation authorizes the bounded Apple-silicon boot handoff through personalized iBSS and iBEC. " +
+                    "The app will verify Stage-1 build-version=$expectedStage1Build, upload the validated personalized iBEC, send the upstream M1 'go' command with bRequest=1, issue the matching 0x21/1 follow-up control request, then require a fresh Recovery device with boot-stage=2 and build-version=$expectedStage2Build. " +
+                    "It stops immediately after Stage-2 verification and never sends RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, or starts restore/erase sequencing."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Pre-arm bounded test") { _, _ -> start(expectedStage1Build) }
+            .setPositiveButton("Pre-arm bounded Stage-2 test") { _, _ -> start(expectedStage1Build, expectedStage2Build) }
             .show()
     }
 
-    private fun start(expectedStage1Build: String) {
+    private fun start(expectedStage1Build: String, expectedStage2Build: String) {
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
         text = "Pre-armed test running…"
         PrearmedDiagnosticEvidenceStore.begin(expectedStage1Build)
         replayedEvidenceSize = 0
-        setOperation(activity, "Pre-armed M1 iBSS → Stage-1 → iBEC diagnostic starting…", true)
-        log(activity, "prearmed Stage-1 iBEC test: explicit user confirmation received; boundary=iBSS-then-iBEC-no-go expectedStage1Build=$expectedStage1Build")
+        setOperation(activity, "Pre-armed M1 Stage-2 diagnostic starting…", true)
+        log(
+            activity,
+            "prearmed Stage-2 test: explicit user confirmation received; boundary=iBSS-iBEC-go-verify-stage2-no-restore-components " +
+                "expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build"
+        )
 
         worker.execute {
             var connection: android.hardware.usb.UsbDeviceConnection? = null
@@ -134,6 +153,11 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 val restorePrepared = RestoreComponentPreparationStore.get() ?: error("Prepared restore components unavailable")
                 val ibec = restorePrepared.components.firstOrNull { it.name == "iBEC" } ?: error("Prepared iBEC unavailable")
                 val ibecFile = ibec.personalizedFile ?: error("Personalized iBEC unavailable")
+                val derivedStage2Build = Stage1BuildMetadata.expectedBuild(ibecFile)
+                    ?: error("Prepared iBEC has no unique embedded mBoot build identifier")
+                require(derivedStage2Build == expectedStage2Build) {
+                    "Prepared iBEC Stage-2 build changed after confirmation: expected=$expectedStage2Build actual=$derivedStage2Build"
+                }
                 val buildId = selectedBuildId(activity) ?: error("Selected build unavailable")
                 require(foundationMatchesDevice(ticket.foundation, dfu)) { "DFU device does not match TSS foundation" }
                 require(ticket.buildId.equals(buildId, true) && ticket.identityIndex == ibssPrepared.result.identityIndex) { "iBSS/TSS identity mismatch" }
@@ -156,7 +180,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                     file = ibssPrepared.result.file,
                     identityIndex = ibssPrepared.result.identityIndex,
                     sourceManifestPath = ibssPrepared.sourceManifestPath,
-                    personalizationId = "$buildId:identity-${ibssPrepared.result.identityIndex}:prearmed"
+                    personalizationId = "$buildId:identity-${ibssPrepared.result.identityIndex}:prearmed-stage2"
                 )
                 val transitionStarted = SystemClock.elapsedRealtime()
                 DfuStage1Session(
@@ -168,15 +192,15 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 ).uploadPersonalizedIbss(image) { progress -> setProgress(activity, "Sending personalized iBSS", progress.percent) }
                 connection.close()
                 connection = null
-                log(activity, "prearmed Stage-1 iBEC test: iBSS sent; waiting for fresh Recovery enumeration expectedBuild=$expectedStage1Build")
+                log(activity, "prearmed Stage-2 test: iBSS sent; waiting for fresh Stage-1 Recovery expectedBuild=$expectedStage1Build")
 
-                val recovery = waitForExpectedStage1(activity, usb, ticket, transitionStarted, expectedStage1Build)
-                val identityKey = deviceIdentityKey(recovery)
-                log(activity, "prearmed Stage-1 proof: boot-stage=1 build-version=$expectedStage1Build; handing off immediately to PR #36 upload path")
+                val stage1 = waitForExpectedRecoveryStage(activity, usb, ticket, transitionStarted, STAGE_1, expectedStage1Build, "Stage-1")
+                val identityKey = deviceIdentityKey(stage1)
+                log(activity, "prearmed Stage-1 proof: boot-stage=1 build-version=$expectedStage1Build")
                 Stage1RecoveryProofStore.prove(identityKey, STAGE_1, expectedStage1Build)
 
-                connection = usb.openDevice(recovery) ?: error("openDevice failed for custom Stage-1 Recovery")
-                val recoveryClaimed = AppleUsb.claimBestInterface(recovery, connection) ?: error("Could not claim Recovery interface")
+                connection = usb.openDevice(stage1) ?: error("openDevice failed for custom Stage-1 Recovery")
+                val recoveryClaimed = AppleUsb.claimBestInterface(stage1, connection) ?: error("Could not claim Recovery interface")
                 val bulkOut = recoveryClaimed.bulkOut ?: error("Recovery bulk OUT endpoint unavailable")
                 val command = RecoveryTransport(connection, recoveryClaimed.bulkIn)
                 val liveStage = command.getenv("boot-stage").value.trim()
@@ -184,11 +208,11 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 require(liveStage == STAGE_1 && liveBuild == expectedStage1Build) {
                     "Custom Stage-1 changed before iBEC init: boot-stage=$liveStage build-version=$liveBuild expected=$expectedStage1Build"
                 }
-                require(foundationMatchesDevice(ticket.foundation, recovery)) { "Recovery device no longer matches TSS foundation" }
+                require(foundationMatchesDevice(ticket.foundation, stage1)) { "Recovery device no longer matches TSS foundation" }
                 log(
                     activity,
-                    "prearmed Stage-1 Recovery interface already claimed: id=${recoveryClaimed.intf.id} " +
-                        "alt=${recoveryClaimed.intf.alternateSetting} bulkOut=0x%02x; skipping redundant setInterface before upload init"
+                    "prearmed Stage-1 Recovery interface already claimed: id=${recoveryClaimed.intf.id} alt=${recoveryClaimed.intf.alternateSetting} " +
+                        "bulkOut=0x%02x"
                             .format(bulkOut.address)
                 )
 
@@ -198,11 +222,38 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                         setProgress(activity, "Uploading personalized iBEC", progress.percent)
                     }
                 }
-                log(activity, "prearmed iBEC COMPLETE: bytes=${result.bytesSent} packets=${result.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s".format(result.endpointAddress, result.initResult?.toString() ?: "unknown", result.initElapsedMs?.toString() ?: "unknown"))
-                log(activity, "prearmed Stage-1 iBEC test: STOP boundary reached — no go and no restore-OS component sent")
-                setOperation(activity, "Pre-armed diagnostic complete; stopped before go", false)
+                log(
+                    activity,
+                    "prearmed iBEC COMPLETE: bytes=${result.bytesSent} packets=${result.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s"
+                        .format(result.endpointAddress, result.initResult?.toString() ?: "unknown", result.initElapsedMs?.toString() ?: "unknown")
+                )
+
+                val stage2TransitionStarted = SystemClock.elapsedRealtime()
+                log(activity, "prearmed iBEC: sending upstream Apple-silicon go command bRequest=${RecoveryTransport.APPLE_SILICON_GO_BREQUEST}")
+                val goBytes = command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
+                log(activity, "prearmed iBEC: go command accepted bytes=$goBytes")
+                val followup = runCatching {
+                    command.controlTransferOut(
+                        requestType = APPLE_DFU_REQUEST_TYPE_OUT,
+                        request = APPLE_DFU_DETACH_REQUEST,
+                        timeoutMs = UPSTREAM_FOLLOWUP_TIMEOUT_MS
+                    )
+                }
+                followup.onSuccess {
+                    log(activity, "prearmed iBEC: upstream 0x21/1 follow-up result=${it.transferred}")
+                }.onFailure {
+                    log(activity, "prearmed iBEC: upstream 0x21/1 follow-up became unavailable after go: ${it.javaClass.simpleName}: ${it.message}; deferring outcome to Stage-2 re-enumeration")
+                }
+                connection.close()
+                connection = null
+
+                log(activity, "prearmed Stage-2 test: waiting for fresh Recovery boot-stage=2 expectedBuild=$expectedStage2Build")
+                val stage2 = waitForExpectedRecoveryStage(activity, usb, ticket, stage2TransitionStarted, STAGE_2, expectedStage2Build, "Stage-2")
+                log(activity, "prearmed Stage-2 proof: boot-stage=2 build-version=$expectedStage2Build device=${stage2.deviceName}")
+                log(activity, "prearmed Stage-2 test: STOP boundary reached — no RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, restore, or erase command sent")
+                setOperation(activity, "Pre-armed diagnostic complete; Stage-2 verified", false)
             } catch (t: Throwable) {
-                log(activity, "prearmed Stage-1 iBEC test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                log(activity, "prearmed Stage-2 test FAILED: ${t.javaClass.simpleName}: ${t.message}")
                 setOperation(activity, "Pre-armed diagnostic stopped: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
                 connection?.close()
@@ -216,39 +267,43 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         }
     }
 
-    private fun waitForExpectedStage1(
+    private fun waitForExpectedRecoveryStage(
         activity: AppCompatActivity,
         usb: UsbManager,
         ticket: TssTicketStore.Ticket,
         startedAt: Long,
-        expectedStage1Build: String
+        expectedStage: String,
+        expectedBuild: String,
+        label: String
     ): UsbDevice {
         var lastSeen: String? = null
-        while (SystemClock.elapsedRealtime() - startedAt < STAGE1_WAIT_MS) {
+        while (SystemClock.elapsedRealtime() - startedAt < RECOVERY_STAGE_WAIT_MS) {
             val recovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
             if (recovery != null && foundationMatchesDevice(ticket.foundation, recovery)) {
-                var connection: android.hardware.usb.UsbDeviceConnection? = null
+                var probeConnection: android.hardware.usb.UsbDeviceConnection? = null
                 try {
-                    connection = usb.openDevice(recovery)
-                    if (connection != null) {
-                        val claimed = AppleUsb.claimBestInterface(recovery, connection)
+                    probeConnection = usb.openDevice(recovery)
+                    if (probeConnection != null) {
+                        val claimed = AppleUsb.claimBestInterface(recovery, probeConnection)
                         if (claimed != null) {
-                            val command = RecoveryTransport(connection, claimed.bulkIn)
+                            val command = RecoveryTransport(probeConnection, claimed.bulkIn)
                             val stage = runCatching { command.getenv("boot-stage").value.trim() }.getOrNull()
                             val build = runCatching { command.getenv("build-version").value.trim() }.getOrNull()
                             val seen = "$stage/$build"
                             if (seen != lastSeen) {
                                 lastSeen = seen
-                                log(activity, "prearmed Stage-1 candidate: boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expected=$expectedStage1Build")
+                                log(activity, "prearmed $label candidate: boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expectedStage=$expectedStage expectedBuild=$expectedBuild")
                             }
-                            if (stage == STAGE_1 && build == expectedStage1Build) return recovery
+                            if (stage == expectedStage && build == expectedBuild) return recovery
                         }
                     }
-                } finally { connection?.close() }
+                } finally {
+                    probeConnection?.close()
+                }
             }
-            Thread.sleep(STAGE1_POLL_MS)
+            Thread.sleep(RECOVERY_STAGE_POLL_MS)
         }
-        error("Timed out waiting for expected custom Stage-1 build $expectedStage1Build")
+        error("Timed out waiting for expected $label boot-stage=$expectedStage build=$expectedBuild")
     }
 
     private fun permittedDevice(usb: UsbManager, mode: AppleUsb.Mode): UsbDevice? = usb.deviceList.values.firstOrNull {
@@ -325,11 +380,15 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
 
     companion object {
         private const val REFRESH_MS = 1000L
-        private const val STAGE1_POLL_MS = 50L
-        private const val STAGE1_WAIT_MS = 120_000L
+        private const val RECOVERY_STAGE_POLL_MS = 50L
+        private const val RECOVERY_STAGE_WAIT_MS = 120_000L
+        private const val UPSTREAM_FOLLOWUP_TIMEOUT_MS = 5_000
+        private const val APPLE_DFU_REQUEST_TYPE_OUT = 0x21
+        private const val APPLE_DFU_DETACH_REQUEST = 0x01
         private const val M1_CPID = "8103"
         private const val STAGE_1 = "1"
-        private const val RESERVATION_OWNER = "prearmed-stage1-ibec"
-        private const val READY_LABEL = "Pre-arm M1 iBSS → iBEC Timing Test"
+        private const val STAGE_2 = "2"
+        private const val RESERVATION_OWNER = "prearmed-stage2-go"
+        private const val READY_LABEL = "Pre-arm M1 iBSS → iBEC → Stage-2 Test"
     }
 }
