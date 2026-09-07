@@ -281,7 +281,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms iBSS and the bounded iBEC diagnostic together so the app can act inside the short custom Stage-1 window. It still stops before go and before every restore-OS component."
+                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms the bounded iBSS → Stage-1 prerequisites → iBEC → Stage-2 handoff and stops before every restore-OS or persistent-storage action. The Stage-2 probe below is read-only."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.StartRestoreButton
@@ -299,6 +299,14 @@
                     android:layout_marginTop="8dp"
                     android:enabled="false"
                     android:text="Pre-arm M1 iBSS → iBEC Timing Test" />
+
+                <com.idevicerestore.android.Stage2ReadonlyProbeButton
+                    android:id="@+id/stage2ReadonlyProbeButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Probe M1 Stage-2 (read-only)" />
 
                 <com.idevicerestore.android.IbecTransitionButton
                     android:id="@+id/ibecTransitionButton"
