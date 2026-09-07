@@ -283,7 +283,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Experimental M1 transition tests"
+                    android:text="M1 Stage-2 diagnostics"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
@@ -291,40 +291,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms the bounded iBSS → Stage-1 prerequisites → iBEC → Stage-2 handoff and stops before every restore-OS or persistent-storage action. The Stage-2 probe below is read-only."
+                    android:text="Read-only verification for an already-running M1 Stage-2 iBoot. No firmware uploads, persistent environment changes, bootx, restore, or erase commands are sent."
                     android:textSize="13sp" />
-
-                <com.idevicerestore.android.StartRestoreButton
-                    android:id="@+id/startRestoreButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:enabled="false"
-                    android:text="Test M1 iBSS DFU Transition" />
-
-                <com.idevicerestore.android.PrearmedStage1IbecButton
-                    android:id="@+id/prearmedStage1IbecButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:enabled="false"
-                    android:text="Pre-arm M1 iBSS → iBEC Timing Test" />
 
                 <com.idevicerestore.android.Stage2ReadonlyProbeButton
                     android:id="@+id/stage2ReadonlyProbeButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="10dp"
                     android:enabled="false"
                     android:text="Probe M1 Stage-2 (read-only)" />
-
-                <com.idevicerestore.android.IbecTransitionButton
-                    android:id="@+id/ibecTransitionButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:enabled="false"
-                    android:text="Test M1 Atomic iBEC Upload" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
