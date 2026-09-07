@@ -1,11 +1,18 @@
-# idevicerestore
+# iDeviceRestore
 
 *A command-line application to restore firmware files to iOS devices.*
 
 ![](https://github.com/libimobiledevice/idevicerestore/actions/workflows/build.yml/badge.svg)
 
 ## Table of Contents
-- [Features](#features)
+- [About this fork](#about-this-fork)
+- [Apple silicon Android hardware validation](#apple-silicon-android-hardware-validation)
+- [Upstream idevicerestore features](#upstream-idevicerestore-features)
+- [Building the Android app](#building-the-android-app)
+  - [Linux PC](#linux-pc)
+  - [macOS](#macos-android-build)
+  - [Windows PC](#windows-pc)
+  - [Build output](#build-output)
 - [Building](#building)
   - [Prerequisites](#prerequisites)
     - [Linux (Debian/Ubuntu based)](#linux-debianubuntu-based)
@@ -13,21 +20,89 @@
     - [Windows](#windows)
   - [Configuring the source tree](#configuring-the-source-tree)
   - [Building and installation](#building-and-installation)
-- [Usage](#usage)
+- [Upstream desktop usage](#upstream-desktop-usage)
 - [Contributing](#contributing)
 - [Links](#links)
 - [License](#license)
 - [Credits](#credits)
 
-## Features
+## About this fork
 
-The idevicerestore application is a full reimplementation of all granular steps
+This repository is the **iDeviceRestore** fork maintained at
+[dracinn/iDeviceRestore](https://github.com/dracinn/iDeviceRestore). It keeps the
+upstream `libimobiledevice/idevicerestore` command-line source while developing
+an Android application that can communicate directly with Apple devices over
+Android USB Host/OTG.
+
+Android is currently the active development target for the fork. Work in the
+`android/` tree includes DFU and Recovery/iBoot probing, on-device diagnostic
+logging, firmware catalog discovery, signed-firmware filtering, verified,
+resumable IPSW downloads, Apple TSS/Image4 personalization, and an experimentally
+validated Apple-silicon DFU-to-Stage-2 boot handoff. The longer-term goal is to
+bring the complete idevicerestore restore and non-destructive revive/update flow
+to Android without requiring a desktop computer.
+
+For Android-specific architecture, current functionality, release workflow,
+physical testing notes, and the development roadmap, see
+[`android/README.md`](android/README.md).
+
+The original upstream project is maintained by the libimobiledevice project at
+[libimobiledevice/idevicerestore](https://github.com/libimobiledevice/idevicerestore).
+
+## Apple silicon Android hardware validation
+
+On September 6, 2026, the Android implementation successfully completed a
+bounded, non-destructive DFU → Stage-1 → Stage-2 handoff on a physical
+**MacBook Air (M1, Late 2020 / MacBookAir10,1 / T8103)** using an Android 14 USB
+host.
+
+The validated sequence was:
+
+1. Apple DFU device (`05ac:1227`) detected and verified.
+2. A personalized iBSS was uploaded and the Mac re-enumerated in Recovery as
+   iBoot `boot-stage=1` with build `mBoot-20457.1.29`.
+3. Apple TSS successfully signed the special empty `Ap,LocalPolicy`, which was
+   sent with `lpolrestore`.
+4. All selected BuildIdentity entries marked `IsLoadedByiBootStage1` were
+   personalized and sent before iBEC. On the tested build these were
+   `Ap,RestoreCIO`, `Ap,RestoreTMU`, `RestoreANS`, and `RestoreDCP`.
+5. Personalized iBEC was uploaded, the upstream Apple-silicon one-second settle
+   interval was observed, and `go` was issued with `bRequest=1`.
+6. The Stage-1 USB device disconnected and a **fresh Recovery enumeration**
+   appeared at a new USB device path approximately 0.8 seconds later.
+7. The newly enumerated device independently reported `boot-stage=2`,
+   `build-version=mBoot-20457.1.29`, and `build-style=RELEASE`.
+
+This result proves the Android transport, TSS/LocalPolicy preparation, required
+Stage-1 firmware delivery, personalized iBEC execution, and fresh Stage-2 USB
+handoff on the tested M1 hardware.
+
+The validation intentionally stopped immediately after Stage-2 proof. It did
+**not** send persistent `saveenv`, restore boot arguments, `RestoreRamDisk`, SEP,
+DeviceTree, KernelCache, `bootx`, restore, or erase commands. The tested Stage-2
+environment retained `auto-boot=true`, providing additional evidence that the
+bounded test did not persistently change the iBoot auto-boot setting.
+
+Stage-2 boot handoff is therefore treated as a validated development milestone,
+not as proof that the complete macOS restore or revive/update flow is finished.
+The next milestone is bringing the post-Stage-2 revive/restore environment up in
+a similarly bounded way before any persistent-storage operation is enabled.
+
+## Upstream idevicerestore features
+
+> **Scope:** This section describes the retained upstream desktop
+> `libimobiledevice/idevicerestore` implementation. These capabilities must not
+> be interpreted as features already implemented or hardware-validated by the
+> Android app. Current Android validation is documented separately above and in
+> [`android/README.md`](android/README.md).
+
+The upstream idevicerestore application is a full reimplementation of all granular steps
 which are performed during the restore of a firmware to a device.
 
 In general, upgrades and downgrades are possible, however subject to
 availability of SHSH blobs from Apple for signing the firmware files.
 
-Some key features are:
+Some key upstream features are:
 
 - **Restore:** Update firmware on iOS devices
 - **Firmware:** Use official IPSW firmware archive file or a directory as source
@@ -39,7 +114,7 @@ Some key features are:
 - **SHSH:** Fetch TSS records and save them as ".shsh" files
 - **DFU:** Put devices in pwned DFU mode *(limera1n devices only)*
 - **AP Ticket:** Use custom AP ticket from a file
-- **Cross-Platform:** Tested on Linux, macOS, Windows and Android platforms
+- **Cross-Platform:** Upstream desktop support covers Linux, macOS, and Windows
 - **History:** Developed since 2010
 
 **WARNING:** This tool can easily __destroy your user data__ irreversibly.
@@ -48,7 +123,110 @@ Use with caution and make sure to backup your data before trying to restore.
 
 **In any case, usage is at your own risk.**
 
+## Building the Android app
+
+The Android application lives in `android/` and currently targets Android API
+35 with a minimum supported API level of 26. Building requires a Java 17 JDK,
+the Android SDK, and an Android build environment capable of using Android
+Gradle Plugin 8.7.3 and Kotlin 2.1.0.
+
+The repository currently does not include a Gradle wrapper. Android Studio is
+therefore the recommended build environment on all desktop platforms because it
+can manage the compatible Gradle runtime and Android SDK components for you.
+
+Clone this fork before following the platform-specific instructions:
+
+```shell
+git clone https://github.com/dracinn/iDeviceRestore.git
+cd iDeviceRestore
+```
+
+### Linux PC
+
+1. Install Git and a Java 17 JDK. On Debian/Ubuntu based systems:
+   ```shell
+   sudo apt update
+   sudo apt install git openjdk-17-jdk
+   ```
+2. Install the current stable Android Studio for Linux and complete its first-run
+   Android SDK setup.
+3. In Android Studio, choose **Open** and select the repository's `android/`
+   directory.
+4. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+5. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+If you already have a compatible standalone Gradle installation and Android SDK
+configured, you can build from a terminal instead:
+
+```shell
+cd android
+gradle :app:assembleDebug
+```
+
+### macOS (Android build)
+
+1. Install the Xcode command-line tools if Git is not already available:
+   ```shell
+   xcode-select --install
+   ```
+2. Install a Java 17 JDK, for example with Homebrew:
+   ```shell
+   brew install openjdk@17
+   ```
+3. Install the current stable Android Studio for macOS and complete its first-run
+   Android SDK setup.
+4. Open the repository's `android/` directory in Android Studio.
+5. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+6. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+With a compatible standalone Gradle installation and Android SDK configured,
+the command-line build is:
+
+```shell
+cd android
+gradle :app:assembleDebug
+```
+
+### Windows PC
+
+1. Install Git for Windows.
+2. Install a Java 17 JDK and make sure `JAVA_HOME` points to it.
+3. Install the current stable Android Studio for Windows and complete its
+   first-run Android SDK setup.
+4. Open the repository's `android` directory in Android Studio.
+5. Allow Gradle sync to finish and install any requested Android SDK 35
+   components.
+6. Build the debug APK with **Build > Build App Bundle(s) / APK(s) > Build
+   APK(s)**.
+
+With a compatible standalone Gradle installation and Android SDK configured,
+PowerShell or Command Prompt can build the app with:
+
+```powershell
+cd android
+gradle :app:assembleDebug
+```
+
+### Build output
+
+A successful debug build produces the APK at:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+For release builds, use the repository's GitHub Actions release workflow and the
+signing setup documented in [`android/README.md`](android/README.md). Android
+updates must continue to use the same release signing key.
+
 ## Building
+
+The following section documents the upstream command-line `idevicerestore`
+build. It remains applicable to the desktop C source retained by this fork.
 
 ### Prerequisites
 
@@ -170,8 +348,8 @@ Before we can build it, the source tree has to be configured for building. The s
 
   If you haven't done already, clone the actual project repository and change into the directory.
   ```shell
-  git clone https://github.com/libimobiledevice/idevicerestore.git
-  cd idevicerestore
+  git clone https://github.com/dracinn/iDeviceRestore.git
+  cd iDeviceRestore
   ```
 
   Configure the source tree for building:
@@ -251,7 +429,11 @@ configured to be started automatically as soon as a device is detected
 in normal and/or restore mode. If properly installed this will be handled
 by udev/systemd.
 
-## Usage
+## Upstream desktop usage
+
+> **Scope:** The commands in this section invoke the retained upstream desktop
+> `idevicerestore` CLI. They are not Android-app usage instructions and do not
+> imply that the Android app has completed restore/update support.
 
 The primary scenario is to restore a new firmware to a device.
 First of all attach your device to your machine.
@@ -311,10 +493,12 @@ Please make sure your contribution adheres to:
 
 ## Links
 
-* Homepage: https://libimobiledevice.org/
-* Repository: https://github.com/libimobiledevice/idevicerestore.git
-* Repository (Mirror): https://git.libimobiledevice.org/idevicerestore.git
-* Issue Tracker: https://github.com/libimobiledevice/idevicerestore/issues
+* Fork Repository: https://github.com/dracinn/iDeviceRestore.git
+* Android App Documentation: https://github.com/dracinn/iDeviceRestore/blob/master/android/README.md
+* Upstream Homepage: https://libimobiledevice.org/
+* Upstream Repository: https://github.com/libimobiledevice/idevicerestore.git
+* Upstream Repository (Mirror): https://git.libimobiledevice.org/idevicerestore.git
+* Upstream Issue Tracker: https://github.com/libimobiledevice/idevicerestore/issues
 * Mailing List: https://lists.libimobiledevice.org/mailman/listinfo/libimobiledevice-devel
 * Twitter: https://twitter.com/libimobiledev
 
@@ -331,4 +515,4 @@ iPadOS, tvOS, watchOS, and macOS are trademarks of Apple Inc.
 This project is an independent software application and has not been
 authorized, sponsored, or otherwise approved by Apple Inc.
 
-README Updated on: 2025-09-11
+README Updated on: 2026-09-06
