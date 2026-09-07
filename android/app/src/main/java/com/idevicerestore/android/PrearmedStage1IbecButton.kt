@@ -228,6 +228,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 )
 
                 val stage2TransitionStarted = SystemClock.elapsedRealtime()
+                val stage1DeviceName = stage1.deviceName
                 log(activity, "prearmed iBEC: sending upstream Apple-silicon go command bRequest=${RecoveryTransport.APPLE_SILICON_GO_BREQUEST}")
                 val goBytes = command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
                 log(activity, "prearmed iBEC: go command accepted bytes=$goBytes")
@@ -246,9 +247,18 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 connection.close()
                 connection = null
 
-                log(activity, "prearmed Stage-2 test: waiting for fresh Recovery boot-stage=2 expectedBuild=$expectedStage2Build")
-                val stage2 = waitForExpectedRecoveryStage(activity, usb, ticket, stage2TransitionStarted, STAGE_2, expectedStage2Build, "Stage-2")
-                log(activity, "prearmed Stage-2 proof: boot-stage=2 build-version=$expectedStage2Build device=${stage2.deviceName}")
+                log(activity, "prearmed Stage-2 test: waiting for fresh Recovery enumeration after Stage-1 device=$stage1DeviceName; expectedBuild=$expectedStage2Build")
+                val stage2 = waitForFreshExpectedRecoveryStage(
+                    activity = activity,
+                    usb = usb,
+                    ticket = ticket,
+                    startedAt = stage2TransitionStarted,
+                    previousDeviceName = stage1DeviceName,
+                    expectedStage = STAGE_2,
+                    expectedBuild = expectedStage2Build,
+                    label = "Stage-2"
+                )
+                log(activity, "prearmed Stage-2 proof: fresh-enumeration=true boot-stage=2 build-version=$expectedStage2Build device=${stage2.deviceName}")
                 log(activity, "prearmed Stage-2 test: STOP boundary reached — no RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, restore, or erase command sent")
                 setOperation(activity, "Pre-armed diagnostic complete; Stage-2 verified", false)
             } catch (t: Throwable) {
@@ -266,6 +276,44 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         }
     }
 
+    private fun waitForFreshExpectedRecoveryStage(
+        activity: AppCompatActivity,
+        usb: UsbManager,
+        ticket: TssTicketStore.Ticket,
+        startedAt: Long,
+        previousDeviceName: String,
+        expectedStage: String,
+        expectedBuild: String,
+        label: String
+    ): UsbDevice {
+        var freshBoundaryObserved = false
+        while (SystemClock.elapsedRealtime() - startedAt < RECOVERY_STAGE_WAIT_MS) {
+            if (!freshBoundaryObserved) {
+                val previousStillPresent = usb.deviceList.values.any { it.deviceName == previousDeviceName }
+                val currentRecovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
+                if (!previousStillPresent || (currentRecovery != null && currentRecovery.deviceName != previousDeviceName)) {
+                    freshBoundaryObserved = true
+                    log(
+                        activity,
+                        "prearmed $label fresh-enumeration boundary observed: previousDevice=$previousDeviceName " +
+                            "currentRecovery=${currentRecovery?.deviceName ?: "none"}"
+                    )
+                } else {
+                    Thread.sleep(RECOVERY_STAGE_POLL_MS)
+                    continue
+                }
+            }
+
+            val recovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
+            if (recovery != null && foundationMatchesDevice(ticket.foundation, recovery)) {
+                val verified = probeExpectedRecoveryStage(activity, usb, recovery, expectedStage, expectedBuild, label)
+                if (verified) return recovery
+            }
+            Thread.sleep(RECOVERY_STAGE_POLL_MS)
+        }
+        error("Timed out waiting for fresh expected $label boot-stage=$expectedStage build=$expectedBuild")
+    }
+
     private fun waitForExpectedRecoveryStage(
         activity: AppCompatActivity,
         usb: UsbManager,
@@ -275,34 +323,37 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         expectedBuild: String,
         label: String
     ): UsbDevice {
-        var lastSeen: String? = null
         while (SystemClock.elapsedRealtime() - startedAt < RECOVERY_STAGE_WAIT_MS) {
             val recovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
             if (recovery != null && foundationMatchesDevice(ticket.foundation, recovery)) {
-                var probeConnection: android.hardware.usb.UsbDeviceConnection? = null
-                try {
-                    probeConnection = usb.openDevice(recovery)
-                    if (probeConnection != null) {
-                        val claimed = AppleUsb.claimBestInterface(recovery, probeConnection)
-                        if (claimed != null) {
-                            val command = RecoveryTransport(probeConnection, claimed.bulkIn)
-                            val stage = runCatching { command.getenv("boot-stage").value.trim() }.getOrNull()
-                            val build = runCatching { command.getenv("build-version").value.trim() }.getOrNull()
-                            val seen = "$stage/$build"
-                            if (seen != lastSeen) {
-                                lastSeen = seen
-                                log(activity, "prearmed $label candidate: boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expectedStage=$expectedStage expectedBuild=$expectedBuild")
-                            }
-                            if (stage == expectedStage && build == expectedBuild) return recovery
-                        }
-                    }
-                } finally {
-                    probeConnection?.close()
-                }
+                val verified = probeExpectedRecoveryStage(activity, usb, recovery, expectedStage, expectedBuild, label)
+                if (verified) return recovery
             }
             Thread.sleep(RECOVERY_STAGE_POLL_MS)
         }
         error("Timed out waiting for expected $label boot-stage=$expectedStage build=$expectedBuild")
+    }
+
+    private fun probeExpectedRecoveryStage(
+        activity: AppCompatActivity,
+        usb: UsbManager,
+        recovery: UsbDevice,
+        expectedStage: String,
+        expectedBuild: String,
+        label: String
+    ): Boolean {
+        var probeConnection: android.hardware.usb.UsbDeviceConnection? = null
+        return try {
+            probeConnection = usb.openDevice(recovery) ?: return false
+            val claimed = AppleUsb.claimBestInterface(recovery, probeConnection) ?: return false
+            val command = RecoveryTransport(probeConnection, claimed.bulkIn)
+            val stage = runCatching { command.getenv("boot-stage").value.trim() }.getOrNull()
+            val build = runCatching { command.getenv("build-version").value.trim() }.getOrNull()
+            log(activity, "prearmed $label candidate: boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expectedStage=$expectedStage expectedBuild=$expectedBuild")
+            stage == expectedStage && build == expectedBuild
+        } finally {
+            probeConnection?.close()
+        }
     }
 
     private fun permittedDevice(usb: UsbManager, mode: AppleUsb.Mode): UsbDevice? = usb.deviceList.values.firstOrNull {
