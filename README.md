@@ -7,7 +7,7 @@
 ## Table of Contents
 - [About this fork](#about-this-fork)
 - [Apple silicon Android hardware validation](#apple-silicon-android-hardware-validation)
-- [Features](#features)
+- [Upstream idevicerestore features](#upstream-idevicerestore-features)
 - [Building the Android app](#building-the-android-app)
   - [Linux PC](#linux-pc)
   - [macOS](#macos-android-build)
@@ -20,7 +20,7 @@
     - [Windows](#windows)
   - [Configuring the source tree](#configuring-the-source-tree)
   - [Building and installation](#building-and-installation)
-- [Usage](#usage)
+- [Upstream desktop usage](#upstream-desktop-usage)
 - [Contributing](#contributing)
 - [Links](#links)
 - [License](#license)
@@ -88,15 +88,21 @@ not as proof that the complete macOS restore or revive/update flow is finished.
 The next milestone is bringing the post-Stage-2 revive/restore environment up in
 a similarly bounded way before any persistent-storage operation is enabled.
 
-## Features
+## Upstream idevicerestore features
 
-The idevicerestore application is a full reimplementation of all granular steps
+> **Scope:** This section describes the retained upstream desktop
+> `libimobiledevice/idevicerestore` implementation. These capabilities must not
+> be interpreted as features already implemented or hardware-validated by the
+> Android app. Current Android validation is documented separately above and in
+> [`android/README.md`](android/README.md).
+
+The upstream idevicerestore application is a full reimplementation of all granular steps
 which are performed during the restore of a firmware to a device.
 
 In general, upgrades and downgrades are possible, however subject to
 availability of SHSH blobs from Apple for signing the firmware files.
 
-Some key features are:
+Some key upstream features are:
 
 - **Restore:** Update firmware on iOS devices
 - **Firmware:** Use official IPSW firmware archive file or a directory as source
@@ -108,7 +114,7 @@ Some key features are:
 - **SHSH:** Fetch TSS records and save them as ".shsh" files
 - **DFU:** Put devices in pwned DFU mode *(limera1n devices only)*
 - **AP Ticket:** Use custom AP ticket from a file
-- **Cross-Platform:** Tested on Linux, macOS, Windows and Android platforms
+- **Cross-Platform:** Upstream desktop support covers Linux, macOS, and Windows
 - **History:** Developed since 2010
 
 **WARNING:** This tool can easily __destroy your user data__ irreversibly.
@@ -423,7 +429,11 @@ configured to be started automatically as soon as a device is detected
 in normal and/or restore mode. If properly installed this will be handled
 by udev/systemd.
 
-## Usage
+## Upstream desktop usage
+
+> **Scope:** The commands in this section invoke the retained upstream desktop
+> `idevicerestore` CLI. They are not Android-app usage instructions and do not
+> imply that the Android app has completed restore/update support.
 
 The primary scenario is to restore a new firmware to a device.
 First of all attach your device to your machine.
