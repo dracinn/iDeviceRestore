@@ -2,10 +2,6 @@ name: Android CI
 
 on:
   pull_request:
-    paths:
-      - 'android/**'
-      - '.github/workflows/android-ci.yml'
-      - '.github/workflows/android-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,24 +15,48 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect Android-impacting changes
+        id: changes
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch origin "${{ github.base_ref }}" --no-tags --depth=1
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- android/ .github/workflows/android-ci.yml .github/workflows/android-release.yml; then
+            echo "android=false" >> "$GITHUB_OUTPUT"
+            echo "No Android-impacting changes detected; build steps will be skipped."
+          else
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            echo "Android-impacting changes detected; running the debug APK build."
+          fi
 
       - name: Set up Node.js 24 LTS
+        if: steps.changes.outputs.android == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: '24'
 
       - name: Set up JDK 21
+        if: steps.changes.outputs.android == 'true'
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Set up Gradle 8.14.5
+        if: steps.changes.outputs.android == 'true'
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.14.5'
 
       - name: Verify toolchains
+        if: steps.changes.outputs.android == 'true'
         run: |
           node --version
           npm --version
@@ -44,12 +64,18 @@ jobs:
           gradle --version
 
       - name: Build debug APK
+        if: steps.changes.outputs.android == 'true'
         run: gradle -p android --no-daemon --stacktrace assembleDebug
 
       - name: Upload debug APK
+        if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: iDeviceRestore-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Documentation-only PR
+        if: steps.changes.outputs.android != 'true'
+        run: echo "No Android-impacting changes; build-debug-apk passes without building the APK."
