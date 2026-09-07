@@ -59,10 +59,15 @@ class RecoveryTransport(
      * Mirrors libirecovery's irecv_send_command_breq().
      *
      * Apple Silicon restore flows use this for special iBoot commands (notably the M1 iBEC `go`
-     * transition with bRequest=1). This primitive does not choose commands on its own.
+     * transition with bRequest=1). Upstream idevicerestore gives a newly uploaded iBEC one second
+     * to settle before issuing that transition; preserve the same timing here rather than racing
+     * execution immediately after the final upload packet.
      */
     fun sendCommandBreq(command: String, request: Int): Int = COMMAND_CHANNEL_LOCK.withLock {
         require(request in 0..0xFF) { "Recovery bRequest must be between 0 and 255" }
+        if (command == "go" && request == APPLE_SILICON_GO_BREQUEST) {
+            Thread.sleep(APPLE_SILICON_IBEC_SETTLE_MS)
+        }
         sendCommandInternal(command, request)
     }
 
@@ -214,6 +219,7 @@ class RecoveryTransport(
         /** One iBoot command/response stream is shared by all Android connections to Recovery USB. */
         private val COMMAND_CHANNEL_LOCK = ReentrantLock(true)
 
+        private const val APPLE_SILICON_IBEC_SETTLE_MS = 1_000L
         private const val IRECV_DEFAULT_COMMAND_REQUEST = 0
         private const val RECOVERY_REQUEST_TYPE_OUT = 0x40
         private const val RECOVERY_REQUEST_TYPE_IN = 0xC0

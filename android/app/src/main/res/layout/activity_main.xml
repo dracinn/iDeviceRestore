@@ -281,7 +281,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Each state-changing step requires explicit confirmation. The iBSS test sends only the personalized iBSS and stops in Stage-1 Recovery. The iBEC test performs upload initialization and the personalized iBEC bulk transfer on one Recovery USB connection, then stops before go and before every restore-OS component."
+                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms iBSS and the bounded iBEC diagnostic together so the app can act inside the short custom Stage-1 window. It still stops before go and before every restore-OS component."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.StartRestoreButton
@@ -291,6 +291,14 @@
                     android:layout_marginTop="10dp"
                     android:enabled="false"
                     android:text="Test M1 iBSS DFU Transition" />
+
+                <com.idevicerestore.android.PrearmedStage1IbecButton
+                    android:id="@+id/prearmedStage1IbecButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Pre-arm M1 iBSS → iBEC Timing Test" />
 
                 <com.idevicerestore.android.IbecTransitionButton
                     android:id="@+id/ibecTransitionButton"
