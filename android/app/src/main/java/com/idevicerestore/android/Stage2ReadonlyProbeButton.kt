@@ -63,8 +63,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
         }
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
         val recovery = permittedRecovery(usb)
-        val ids = recovery?.let(AppleUsb::bootIdentifiers)
-        val ready = recovery != null && ids?.cpidHex.equals(M1_CPID, true)
+        val ready = recovery != null
         isEnabled = ready
         text = if (ready) READY_LABEL else "Connect M1 Recovery for Stage-2 probe"
     }
@@ -105,7 +104,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
                 log(activity, "Stage-2 read-only probe: USB reservation acquired")
 
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
-                val recovery = permittedRecovery(usb) ?: error("No permitted Apple Recovery device is connected")
+                val recovery = permittedRecovery(usb) ?: error("No permitted M1 Apple Recovery device is connected")
                 val ids = AppleUsb.bootIdentifiers(recovery) ?: error("Recovery boot identifiers unavailable")
                 require(ids.cpidHex.equals(M1_CPID, true)) { "Stage-2 probe is restricted to M1 CPID 0x$M1_CPID" }
 
@@ -183,8 +182,11 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
         }
     }
 
-    private fun permittedRecovery(usb: UsbManager): UsbDevice? = usb.deviceList.values.firstOrNull {
-        it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it)
+    private fun permittedRecovery(usb: UsbManager): UsbDevice? = usb.deviceList.values.firstOrNull { device ->
+        device.vendorId == AppleUsb.APPLE_VID &&
+            AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY &&
+            usb.hasPermission(device) &&
+            AppleUsb.bootIdentifiers(device)?.cpidHex.equals(M1_CPID, true)
     }
 
     private fun singleLineInterfaceSummary(device: UsbDevice): String =
