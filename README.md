@@ -6,6 +6,7 @@
 
 ## Table of Contents
 - [About this fork](#about-this-fork)
+- [Apple silicon Android hardware validation](#apple-silicon-android-hardware-validation)
 - [Features](#features)
 - [Building the Android app](#building-the-android-app)
   - [Linux PC](#linux-pc)
@@ -35,9 +36,11 @@ Android USB Host/OTG.
 
 Android is currently the active development target for the fork. Work in the
 `android/` tree includes DFU and Recovery/iBoot probing, on-device diagnostic
-logging, firmware catalog discovery, signed-firmware filtering, and verified,
-resumable IPSW downloads. The longer-term goal is to bring the complete
-idevicerestore restore flow to Android without requiring a desktop computer.
+logging, firmware catalog discovery, signed-firmware filtering, verified,
+resumable IPSW downloads, Apple TSS/Image4 personalization, and an experimentally
+validated Apple-silicon DFU-to-Stage-2 boot handoff. The longer-term goal is to
+bring the complete idevicerestore restore and non-destructive revive/update flow
+to Android without requiring a desktop computer.
 
 For Android-specific architecture, current functionality, release workflow,
 physical testing notes, and the development roadmap, see
@@ -45,6 +48,45 @@ physical testing notes, and the development roadmap, see
 
 The original upstream project is maintained by the libimobiledevice project at
 [libimobiledevice/idevicerestore](https://github.com/libimobiledevice/idevicerestore).
+
+## Apple silicon Android hardware validation
+
+On September 6, 2026, the Android implementation successfully completed a
+bounded, non-destructive DFU → Stage-1 → Stage-2 handoff on a physical
+**MacBook Air (M1, Late 2020 / MacBookAir10,1 / T8103)** using an Android 14 USB
+host.
+
+The validated sequence was:
+
+1. Apple DFU device (`05ac:1227`) detected and verified.
+2. A personalized iBSS was uploaded and the Mac re-enumerated in Recovery as
+   iBoot `boot-stage=1` with build `mBoot-20457.1.29`.
+3. Apple TSS successfully signed the special empty `Ap,LocalPolicy`, which was
+   sent with `lpolrestore`.
+4. All selected BuildIdentity entries marked `IsLoadedByiBootStage1` were
+   personalized and sent before iBEC. On the tested build these were
+   `Ap,RestoreCIO`, `Ap,RestoreTMU`, `RestoreANS`, and `RestoreDCP`.
+5. Personalized iBEC was uploaded, the upstream Apple-silicon one-second settle
+   interval was observed, and `go` was issued with `bRequest=1`.
+6. The Stage-1 USB device disconnected and a **fresh Recovery enumeration**
+   appeared at a new USB device path approximately 0.8 seconds later.
+7. The newly enumerated device independently reported `boot-stage=2`,
+   `build-version=mBoot-20457.1.29`, and `build-style=RELEASE`.
+
+This result proves the Android transport, TSS/LocalPolicy preparation, required
+Stage-1 firmware delivery, personalized iBEC execution, and fresh Stage-2 USB
+handoff on the tested M1 hardware.
+
+The validation intentionally stopped immediately after Stage-2 proof. It did
+**not** send persistent `saveenv`, restore boot arguments, `RestoreRamDisk`, SEP,
+DeviceTree, KernelCache, `bootx`, restore, or erase commands. The tested Stage-2
+environment retained `auto-boot=true`, providing additional evidence that the
+bounded test did not persistently change the iBoot auto-boot setting.
+
+Stage-2 boot handoff is therefore treated as a validated development milestone,
+not as proof that the complete macOS restore or revive/update flow is finished.
+The next milestone is bringing the post-Stage-2 revive/restore environment up in
+a similarly bounded way before any persistent-storage operation is enabled.
 
 ## Features
 
@@ -463,4 +505,4 @@ iPadOS, tvOS, watchOS, and macOS are trademarks of Apple Inc.
 This project is an independent software application and has not been
 authorized, sponsored, or otherwise approved by Apple Inc.
 
-README Updated on: 2026-09-05
+README Updated on: 2026-09-06
