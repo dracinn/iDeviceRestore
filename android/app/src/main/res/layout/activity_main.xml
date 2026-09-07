@@ -90,7 +90,7 @@
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <com.idevicerestore.android.BootStateStatusTextView
                     android:id="@+id/status"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -170,13 +170,31 @@
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/firmwareStatus"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="Waiting for device identification"
-                    android:textSize="15sp" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/firmwareStatus"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Waiting for device identification"
+                        android:textSize="15sp" />
+
+                    <com.idevicerestore.android.FirmwareProgressTextView
+                        android:id="@+id/firmwareProgressText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:text=""
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <com.idevicerestore.android.PercentProgressBar
                     android:id="@+id/firmwareProgress"
@@ -186,14 +204,6 @@
                     android:layout_marginTop="10dp"
                     android:max="1000"
                     android:progress="0" />
-
-                <TextView
-                    android:id="@+id/firmwareProgressText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text=""
-                    android:textSize="13sp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/selectFirmwareButton"
