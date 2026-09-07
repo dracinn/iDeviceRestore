@@ -72,7 +72,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
             ticket != null && foundationMatchesDevice(ticket.foundation, dfu) &&
             ibss != null && ibss.result.file.isFile && ibss.result.file.length() == ibss.result.personalizedBytes &&
             expectedStage1Build != null &&
-            preparedRestore != null && ibecFile?.isFile == true && ibec.personalizedBytes == ibecFile.length() &&
+            preparedRestore != null && ibec != null && ibecFile?.isFile == true && ibec.personalizedBytes == ibecFile.length() &&
             expectedStage2Build != null &&
             buildId != null && ticket.buildId.equals(buildId, true) && preparedRestore.buildId.equals(buildId, true) &&
             preparedRestore.identityIndex == ticket.identityIndex && ibss.result.identityIndex == ticket.identityIndex
@@ -212,8 +212,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                 log(
                     activity,
                     "prearmed Stage-1 Recovery interface already claimed: id=${recoveryClaimed.intf.id} alt=${recoveryClaimed.intf.alternateSetting} " +
-                        "bulkOut=0x%02x"
-                            .format(bulkOut.address)
+                        "bulkOut=0x%02x".format(bulkOut.address)
                 )
 
                 log(activity, "prearmed iBEC: issuing 0x41/0 on custom Stage-1; failed init must send zero bulk bytes")
