@@ -90,7 +90,7 @@
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <com.idevicerestore.android.BootStateStatusTextView
                     android:id="@+id/status"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -170,13 +170,31 @@
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/firmwareStatus"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:text="Waiting for device identification"
-                    android:textSize="15sp" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/firmwareStatus"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Waiting for device identification"
+                        android:textSize="15sp" />
+
+                    <com.idevicerestore.android.FirmwareProgressTextView
+                        android:id="@+id/firmwareProgressText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:gravity="end"
+                        android:maxLines="1"
+                        android:text=""
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <com.idevicerestore.android.PercentProgressBar
                     android:id="@+id/firmwareProgress"
@@ -186,14 +204,6 @@
                     android:layout_marginTop="10dp"
                     android:max="1000"
                     android:progress="0" />
-
-                <TextView
-                    android:id="@+id/firmwareProgressText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text=""
-                    android:textSize="13sp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/selectFirmwareButton"
@@ -281,7 +291,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms iBSS and the bounded iBEC diagnostic together so the app can act inside the short custom Stage-1 window. It still stops before go and before every restore-OS component."
+                    android:text="Each state-changing step requires explicit confirmation. The pre-armed test confirms the bounded iBSS → Stage-1 prerequisites → iBEC → Stage-2 handoff and stops before every restore-OS or persistent-storage action. The Stage-2 probe below is read-only."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.StartRestoreButton
@@ -299,6 +309,14 @@
                     android:layout_marginTop="8dp"
                     android:enabled="false"
                     android:text="Pre-arm M1 iBSS → iBEC Timing Test" />
+
+                <com.idevicerestore.android.Stage2ReadonlyProbeButton
+                    android:id="@+id/stage2ReadonlyProbeButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Probe M1 Stage-2 (read-only)" />
 
                 <com.idevicerestore.android.IbecTransitionButton
                     android:id="@+id/ibecTransitionButton"
