@@ -287,16 +287,37 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         label: String
     ): UsbDevice {
         var freshBoundaryObserved = false
+        var lastSnapshotSignature: String? = null
+        var lastHeartbeatAt = startedAt
+        log(activity, "prearmed $label USB observer armed: previousDevice=$previousDeviceName pollMs=$RECOVERY_STAGE_POLL_MS timeoutMs=$RECOVERY_STAGE_WAIT_MS")
         while (SystemClock.elapsedRealtime() - startedAt < RECOVERY_STAGE_WAIT_MS) {
+            val now = SystemClock.elapsedRealtime()
+            val elapsed = now - startedAt
+            val appleDevices = usb.deviceList.values
+                .filter { it.vendorId == AppleUsb.APPLE_VID }
+                .sortedBy { it.deviceName }
+            val snapshotSignature = appleDevices.joinToString("||") { device -> usbSnapshotSignature(usb, device) }
+                .ifEmpty { "none" }
+            if (snapshotSignature != lastSnapshotSignature) {
+                log(activity, "prearmed $label USB observer change: elapsedMs=$elapsed ${describeAppleUsbSnapshot(usb, appleDevices)}")
+                lastSnapshotSignature = snapshotSignature
+                lastHeartbeatAt = now
+            } else if (now - lastHeartbeatAt >= USB_OBSERVER_HEARTBEAT_MS) {
+                log(activity, "prearmed $label USB observer heartbeat: elapsedMs=$elapsed ${describeAppleUsbSnapshot(usb, appleDevices)}")
+                lastHeartbeatAt = now
+            }
+
             if (!freshBoundaryObserved) {
-                val previousStillPresent = usb.deviceList.values.any { it.deviceName == previousDeviceName }
-                val currentRecovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
+                val previousStillPresent = appleDevices.any { it.deviceName == previousDeviceName }
+                val currentRecovery = appleDevices.firstOrNull {
+                    AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it)
+                }
                 if (!previousStillPresent || (currentRecovery != null && currentRecovery.deviceName != previousDeviceName)) {
                     freshBoundaryObserved = true
                     log(
                         activity,
-                        "prearmed $label fresh-enumeration boundary observed: previousDevice=$previousDeviceName " +
-                            "currentRecovery=${currentRecovery?.deviceName ?: "none"}"
+                        "prearmed $label fresh-enumeration boundary observed: elapsedMs=$elapsed previousDevice=$previousDeviceName " +
+                            "previousStillPresent=$previousStillPresent currentRecovery=${currentRecovery?.deviceName ?: "none"}"
                     )
                 } else {
                     Thread.sleep(RECOVERY_STAGE_POLL_MS)
@@ -305,13 +326,21 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
             }
 
             val recovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
-            if (recovery != null && foundationMatchesDevice(ticket.foundation, recovery)) {
-                val verified = probeExpectedRecoveryStage(activity, usb, recovery, expectedStage, expectedBuild, label)
-                if (verified) return recovery
+            if (recovery != null) {
+                if (!foundationMatchesDevice(ticket.foundation, recovery)) {
+                    log(activity, "prearmed $label candidate rejected: foundation mismatch device=${recovery.deviceName} ${usbSnapshotSignature(usb, recovery)}")
+                } else {
+                    val verified = probeExpectedRecoveryStage(activity, usb, recovery, expectedStage, expectedBuild, label)
+                    if (verified) return recovery
+                }
             }
             Thread.sleep(RECOVERY_STAGE_POLL_MS)
         }
-        error("Timed out waiting for fresh expected $label boot-stage=$expectedStage build=$expectedBuild")
+        val finalDevices = usb.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID }.sortedBy { it.deviceName }
+        error(
+            "Timed out waiting for fresh expected $label boot-stage=$expectedStage build=$expectedBuild; " +
+                "freshBoundaryObserved=$freshBoundaryObserved finalUsb=${describeAppleUsbSnapshot(usb, finalDevices)}"
+        )
     }
 
     private fun waitForExpectedRecoveryStage(
@@ -344,17 +373,56 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     ): Boolean {
         var probeConnection: android.hardware.usb.UsbDeviceConnection? = null
         return try {
-            probeConnection = usb.openDevice(recovery) ?: return false
-            val claimed = AppleUsb.claimBestInterface(recovery, probeConnection) ?: return false
+            probeConnection = usb.openDevice(recovery)
+            if (probeConnection == null) {
+                log(activity, "prearmed $label candidate open failed: device=${recovery.deviceName} ${usbSnapshotSignature(usb, recovery)}")
+                return false
+            }
+            val claimed = AppleUsb.claimBestInterface(recovery, probeConnection)
+            if (claimed == null) {
+                log(activity, "prearmed $label candidate claim failed: device=${recovery.deviceName} ${usbSnapshotSignature(usb, recovery)} interfaces=${singleLineInterfaceSummary(recovery)}")
+                return false
+            }
             val command = RecoveryTransport(probeConnection, claimed.bulkIn)
-            val stage = runCatching { command.getenv("boot-stage").value.trim() }.getOrNull()
-            val build = runCatching { command.getenv("build-version").value.trim() }.getOrNull()
-            log(activity, "prearmed $label candidate: boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expectedStage=$expectedStage expectedBuild=$expectedBuild")
+            val stageResult = runCatching { command.getenv("boot-stage").value.trim() }
+            val buildResult = runCatching { command.getenv("build-version").value.trim() }
+            val stage = stageResult.getOrNull()
+            val build = buildResult.getOrNull()
+            if (stageResult.isFailure || buildResult.isFailure) {
+                log(
+                    activity,
+                    "prearmed $label candidate query failure: device=${recovery.deviceName} " +
+                        "bootStageError=${stageResult.exceptionOrNull()?.let { "${it.javaClass.simpleName}:${it.message}" } ?: "none"} " +
+                        "buildError=${buildResult.exceptionOrNull()?.let { "${it.javaClass.simpleName}:${it.message}" } ?: "none"}"
+                )
+            }
+            log(activity, "prearmed $label candidate: device=${recovery.deviceName} boot-stage=${stage ?: "unknown"} build-version=${build ?: "unknown"} expectedStage=$expectedStage expectedBuild=$expectedBuild")
             stage == expectedStage && build == expectedBuild
+        } catch (t: Throwable) {
+            log(activity, "prearmed $label candidate probe exception: device=${recovery.deviceName} ${t.javaClass.simpleName}: ${t.message}")
+            false
         } finally {
             probeConnection?.close()
         }
     }
+
+    private fun describeAppleUsbSnapshot(usb: UsbManager, devices: List<UsbDevice>): String {
+        if (devices.isEmpty()) return "devices=none"
+        return "devices=" + devices.joinToString(" ; ") { usbSnapshotSignature(usb, it) }
+    }
+
+    private fun usbSnapshotSignature(usb: UsbManager, device: UsbDevice): String =
+        "path=${device.deviceName} vid=0x%04x pid=0x%04x mode=%s permission=%s interfaces=%d [%s]".format(
+            device.vendorId,
+            device.productId,
+            AppleUsb.mode(device),
+            usb.hasPermission(device),
+            device.interfaceCount,
+            singleLineInterfaceSummary(device)
+        )
+
+    private fun singleLineInterfaceSummary(device: UsbDevice): String =
+        AppleUsb.interfaceSummary(device).trim().replace("\r", "").replace("\n", " | ")
 
     private fun permittedDevice(usb: UsbManager, mode: AppleUsb.Mode): UsbDevice? = usb.deviceList.values.firstOrNull {
         it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == mode && usb.hasPermission(it)
@@ -432,6 +500,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         private const val REFRESH_MS = 1000L
         private const val RECOVERY_STAGE_POLL_MS = 50L
         private const val RECOVERY_STAGE_WAIT_MS = 120_000L
+        private const val USB_OBSERVER_HEARTBEAT_MS = 5_000L
         private const val UPSTREAM_FOLLOWUP_TIMEOUT_MS = 5_000
         private const val APPLE_DFU_REQUEST_TYPE_OUT = 0x21
         private const val APPLE_DFU_DETACH_REQUEST = 0x01
