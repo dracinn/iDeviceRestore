@@ -66,7 +66,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
         val ids = recovery?.let(AppleUsb::bootIdentifiers)
         val ready = recovery != null && ids?.cpidHex.equals(M1_CPID, true)
         isEnabled = ready
-        text = if (ready) READY_LABEL else "Connect verified M1 Stage-2 Recovery"
+        text = if (ready) READY_LABEL else "Connect M1 Recovery for Stage-2 probe"
     }
 
     private fun confirm() {
