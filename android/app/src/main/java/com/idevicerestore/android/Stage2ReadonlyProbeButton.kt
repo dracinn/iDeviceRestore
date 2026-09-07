@@ -77,7 +77,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
             .setMessage(
                 "This test only inspects the connected M1 Recovery USB topology and issues a fixed whitelist of read-only iBoot getenv queries: " +
                     READ_ONLY_VARIABLES.joinToString(", ") + ". " +
-                    "It requires boot-stage=2 before accepting the result. It does not upload firmware and does not send setenv, saveenv, bootx, RestoreRamDisk, SEP, DeviceTree, KernelCache, restore, or erase commands."
+                    "It verifies boot-stage=2 first and stops immediately if that proof fails. It does not upload firmware and does not send setenv, saveenv, bootx, RestoreRamDisk, SEP, DeviceTree, KernelCache, restore, or erase commands."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Run read-only probe") { _, _ -> start() }
@@ -134,16 +134,20 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
 
                 val transport = RecoveryTransport(connection, claimed.bulkIn)
                 val values = linkedMapOf<String, String>()
-                READ_ONLY_VARIABLES.forEach { variable ->
+
+                val stage = transport.getenv("boot-stage").value.trim()
+                values["boot-stage"] = stage
+                log(activity, "Stage-2 getenv boot-stage=${stage.ifEmpty { "<empty>" }}")
+                require(stage == STAGE_2) { "Expected boot-stage=2, got ${stage.ifEmpty { "unknown" }}" }
+                log(activity, "Stage-2 proof accepted: boot-stage=2; continuing remaining read-only queries")
+
+                READ_ONLY_VARIABLES.drop(1).forEach { variable ->
                     val value = transport.getenv(variable).value.trim()
                     values[variable] = value
                     log(activity, "Stage-2 getenv $variable=${value.ifEmpty { "<empty>" }}")
                 }
 
-                val stage = values["boot-stage"]
                 val build = values["build-version"]
-                require(stage == STAGE_2) { "Expected boot-stage=2, got ${stage ?: "unknown"}" }
-
                 val preparedBuild = RestoreComponentPreparationStore.get()
                     ?.components
                     ?.firstOrNull { it.name == "iBEC" }
