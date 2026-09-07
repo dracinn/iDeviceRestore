@@ -185,7 +185,12 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
                     "Custom Stage-1 changed before iBEC init: boot-stage=$liveStage build-version=$liveBuild expected=$expectedStage1Build"
                 }
                 require(foundationMatchesDevice(ticket.foundation, recovery)) { "Recovery device no longer matches TSS foundation" }
-                require(connection.setInterface(recoveryClaimed.intf)) { "Android could not activate Recovery interface" }
+                log(
+                    activity,
+                    "prearmed Stage-1 Recovery interface already claimed: id=${recoveryClaimed.intf.id} " +
+                        "alt=${recoveryClaimed.intf.alternateSetting} bulkOut=0x%02x; skipping redundant setInterface before upload init"
+                            .format(bulkOut.address)
+                )
 
                 log(activity, "prearmed iBEC: issuing 0x41/0 on custom Stage-1; failed init must send zero bulk bytes")
                 val result = FileInputStream(ibecFile).use { input ->
