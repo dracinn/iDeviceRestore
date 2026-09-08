@@ -1,14 +1,10 @@
 package com.idevicerestore.android
 
 import android.content.Context
-import android.content.ContextWrapper
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.AttributeSet
-import android.view.View
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -57,7 +53,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
             text = "Stage-2 probe running…"
             return
         }
-        val activity = activity() ?: run {
+        val activity = AndroidUiBridge.activity(context) ?: run {
             isEnabled = false
             return
         }
@@ -69,7 +65,7 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
     }
 
     private fun confirm() {
-        val activity = activity() ?: return
+        val activity = AndroidUiBridge.activity(context) ?: return
         if (!isEnabled || inFlight.get()) return
         AlertDialog.Builder(activity)
             .setTitle("Run read-only Stage-2 probe?")
@@ -84,11 +80,11 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
     }
 
     private fun start() {
-        val activity = activity() ?: return
+        val activity = AndroidUiBridge.activity(context) ?: return
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
         text = "Stage-2 probe running…"
-        setOperation(activity, "Read-only M1 Stage-2 probe starting…", true)
+        AndroidUiBridge.setOperation(activity, "Read-only M1 Stage-2 probe starting…", true)
         log(
             activity,
             "Stage-2 read-only probe: explicit user confirmation received; boundary=USB-descriptors+whitelisted-getenv-only; " +
@@ -166,10 +162,14 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
                     "Stage-2 read-only probe PASS: boot-stage=2 build-version=${build ?: "unknown"}; " +
                         "STOP boundary reached with no uploads, persistent environment writes, bootx, restore, or erase"
                 )
-                setOperation(activity, "Read-only Stage-2 probe complete", false)
+                AndroidUiBridge.setOperation(activity, "Read-only Stage-2 probe complete", false)
             } catch (t: Throwable) {
                 log(activity, "Stage-2 read-only probe FAILED: ${t.javaClass.simpleName}: ${t.message}")
-                setOperation(activity, "Stage-2 probe stopped: ${t.message ?: t.javaClass.simpleName}", false)
+                AndroidUiBridge.setOperation(
+                    activity,
+                    "Stage-2 probe stopped: ${t.message ?: t.javaClass.simpleName}",
+                    false
+                )
             } finally {
                 connection?.close()
                 reservation?.let { lease ->
@@ -192,31 +192,13 @@ class Stage2ReadonlyProbeButton @JvmOverloads constructor(
     private fun singleLineInterfaceSummary(device: UsbDevice): String =
         AppleUsb.interfaceSummary(device).trim().replace("\r", "").replace("\n", " | ")
 
-    private fun setOperation(activity: AppCompatActivity, message: String, busy: Boolean) = activity.runOnUiThread {
-        activity.findViewById<TextView?>(R.id.operationStatus)?.text = message
-        activity.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply {
-            visibility = if (busy) View.VISIBLE else View.GONE
-            if (busy) isIndeterminate = true
-        }
-    }
-
-    private fun log(activity: AppCompatActivity, message: String) = activity.runOnUiThread {
-        runCatching {
-            val method = activity.javaClass.getDeclaredMethod("log", String::class.java)
-            method.isAccessible = true
-            method.invoke(activity, message)
-        }.onFailure {
-            activity.findViewById<TextView?>(R.id.operationStatus)?.text = message
-        }
-    }
-
-    private tailrec fun activityFrom(context: Context): AppCompatActivity? = when (context) {
-        is AppCompatActivity -> context
-        is ContextWrapper -> activityFrom(context.baseContext)
-        else -> null
-    }
-
-    private fun activity(): AppCompatActivity? = activityFrom(context)
+    private fun log(activity: androidx.appcompat.app.AppCompatActivity, message: String) =
+        AndroidUiBridge.log(
+            activity,
+            message,
+            fallbackViewId = R.id.operationStatus,
+            appendFallback = false
+        )
 
     companion object {
         private const val M1_CPID = "8103"
