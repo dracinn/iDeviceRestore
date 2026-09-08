@@ -8,7 +8,12 @@ import android.view.View
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-/** Presentation-only routing for the mockup-driven multi-screen shell. */
+/**
+ * Presentation-only routing for the mockup-driven shell.
+ *
+ * The normal app exposes verified functions only. Unverified restore work is not reachable here;
+ * active development and device-specific testing opens BootDiagnosticsActivity instead.
+ */
 class MockupNavigationButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -19,18 +24,33 @@ class MockupNavigationButton @JvmOverloads constructor(
         setOnClickListener { route(tag?.toString()) }
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        when (tag?.toString()) {
+            ACTION_RESTORE -> visibility = View.GONE
+            ACTION_UPDATE -> text = "Firmware\nSigned downloads"
+            ACTION_DIAGNOSTICS -> text = when (id) {
+                R.id.quickDiagnosticsButton -> "Boot Diagnostics\nDevelopment & testing"
+                else -> text
+            }
+        }
+    }
+
     private fun route(action: String?) {
         when (action) {
             ACTION_HOME -> showScreen(R.id.screenHome, ACTION_HOME)
             ACTION_FIRMWARE, ACTION_UPDATE -> showScreen(R.id.screenFirmware, ACTION_FIRMWARE)
             ACTION_DEVICES -> showScreen(R.id.screenDevices, ACTION_DEVICES)
             ACTION_TOOLS -> showScreen(R.id.screenTools, ACTION_TOOLS)
-            ACTION_RESTORE -> showScreen(R.id.screenRestore, null)
-            ACTION_DIAGNOSTICS -> showScreen(R.id.screenDiagnostics, null)
-            ACTION_BOOT_DIAGNOSTICS -> AndroidUiBridge.activity(context)?.startActivity(
-                Intent(context, BootDiagnosticsActivity::class.java)
-            )
+            ACTION_DIAGNOSTICS, ACTION_BOOT_DIAGNOSTICS -> openBootDiagnostics()
+            ACTION_RESTORE -> Unit
         }
+    }
+
+    private fun openBootDiagnostics() {
+        AndroidUiBridge.activity(context)?.startActivity(
+            Intent(context, BootDiagnosticsActivity::class.java)
+        )
     }
 
     private fun showScreen(targetId: Int, selectedNavAction: String?) {
@@ -71,9 +91,7 @@ class MockupNavigationButton @JvmOverloads constructor(
             R.id.screenHome,
             R.id.screenFirmware,
             R.id.screenDevices,
-            R.id.screenTools,
-            R.id.screenRestore,
-            R.id.screenDiagnostics
+            R.id.screenTools
         )
         private val NAV_BUTTON_IDS = intArrayOf(
             R.id.navHomeButton,
