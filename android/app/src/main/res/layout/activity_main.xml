@@ -283,7 +283,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="M1 Stage-2 diagnostics"
+                    android:text="M1 Stage-2 test"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
@@ -291,16 +291,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Read-only verification for an already-running M1 Stage-2 iBoot. No firmware uploads, persistent environment changes, bootx, restore, or erase commands are sent."
+                    android:text="Starts from M1 DFU, runs the proven bounded iBSS → Stage-1 prerequisites → iBEC → fresh Stage-2 handoff, verifies boot-stage=2 and the expected build, then stops before restore-OS or persistent-storage actions."
                     android:textSize="13sp" />
 
-                <com.idevicerestore.android.Stage2ReadonlyProbeButton
-                    android:id="@+id/stage2ReadonlyProbeButton"
+                <com.idevicerestore.android.PrearmedStage1IbecButton
+                    android:id="@+id/prearmedStage1IbecButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:enabled="false"
-                    android:text="Probe M1 Stage-2 (read-only)" />
+                    android:text="Run M1 DFU → Stage-2 Test" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
