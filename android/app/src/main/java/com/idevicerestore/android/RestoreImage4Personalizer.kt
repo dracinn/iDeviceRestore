@@ -44,14 +44,15 @@ object RestoreImage4Personalizer {
             return Result(raw.name, null, "deferred-tbm-im4r", true)
         }
 
-        // Current upstream img4_stitch_component() only rewrites a small restore subset.
-        // RestoreRamDisk must already be an IM4P and is stitched with its existing rdsk tag.
+        // Upstream personalizes generic Image4 components with the AP ticket as-is. A small restore
+        // subset is additionally retagged before stitching; all other no-TBM IM4P payloads retain
+        // their manifest-provided component tag.
         val targetTag = when (raw.name) {
             "iBEC", "RestoreRamDisk" -> null
             "RestoreDeviceTree" -> "rdtr"
             "RestoreSEP" -> "rsep"
             "RestoreKernelCache" -> "rkrn"
-            else -> return Result(raw.name, null, "unsupported-component", true)
+            else -> null
         }
 
         check(destinationDirectory.isDirectory || destinationDirectory.mkdirs()) {
@@ -61,7 +62,8 @@ object RestoreImage4Personalizer {
         Image4StructureValidator.validateRawIm4p(raw.file, raw.name)
         val componentTagOffset = if (targetTag == null) null else findComponentTagOffset(raw.file, raw.name)
 
-        val destination = File(destinationDirectory, "identity-${ticket.identityIndex}-${raw.name}.personalized.img4")
+        val safeName = raw.name.replace(Regex("[^A-Za-z0-9,._-]+"), "_")
+        val destination = File(destinationDirectory, "identity-${ticket.identityIndex}-$safeName.personalized.img4")
         val temporary = File(destination.parentFile, destination.name + ".part")
         if (temporary.exists() && !temporary.delete()) {
             throw IOException("Could not remove stale temporary file ${temporary.absolutePath}")
