@@ -10,6 +10,7 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
     <application
+        android:name=".IDeviceRestoreApplication"
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:label="iDeviceRestore Lab"
