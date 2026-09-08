@@ -410,8 +410,8 @@
     <TextView android:id="@+id/operationStatus" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     <ProgressBar android:id="@+id/operationProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-    <com.idevicerestore.android.PrepareIbssButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-    <com.idevicerestore.android.PrepareRestoreComponentsButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     <com.idevicerestore.android.PrearmedStage1IbecButton android:id="@+id/prearmedStage1IbecButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     <com.idevicerestore.android.Stage2FirmwareBatchTestButton android:id="@+id/stage2FirmwareBatchTestDelegateButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
 </com.idevicerestore.android.InsetAwareShellLayout>
