@@ -1,0 +1,15 @@
+<resources>
+    <style name="Theme.IDeviceRestore" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/mock_primary</item>
+        <item name="colorPrimaryVariant">@color/mock_primary_dark</item>
+        <item name="colorSecondary">@color/mock_primary</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/mock_background</item>
+        <item name="android:statusBarColor">@color/mock_background</item>
+        <item name="android:navigationBarColor">@color/mock_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="materialButtonStyle">@style/Widget.IDeviceRestore.Button</item>
+        <item name="materialCardViewStyle">@style/Widget.IDeviceRestore.Card</item>
+    </style>
+</resources>
