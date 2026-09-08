@@ -22,7 +22,8 @@
         <activity
             android:name=".BootDiagnosticsActivity"
             android:exported="false"
-            android:label="iDeviceRestore Boot Diagnostics" />
+            android:label="iDeviceRestore Boot Diagnostics"
+            android:taskAffinity="${applicationId}.bootdiagnostics" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
