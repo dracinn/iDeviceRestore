@@ -4,14 +4,18 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.os.Looper
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
+import java.lang.reflect.InvocationTargetException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * User-facing current restore-entry test orchestrator.
@@ -115,7 +119,7 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
 
                 val prearmed = rootView.findViewById<PrearmedStage1IbecButton?>(R.id.prearmedStage1IbecButton)
                     ?: error("Pre-armed Stage-2 delegate unavailable")
-                invokePrivateStart(prearmed, expectedStage1Build, expectedStage2Build)
+                invokePrivateStartOnUiThread(activity, prearmed, expectedStage1Build, expectedStage2Build)
 
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
                 val deadline = SystemClock.elapsedRealtime() + STAGE2_WAIT_MS
@@ -152,7 +156,11 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
 
                 error("Timed out waiting for the exact custom Stage-2 environment after the pre-armed boot transaction")
             } catch (t: Throwable) {
-                log(activity, "Automated current test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                val root = unwrapInvocationFailure(t)
+                log(
+                    activity,
+                    "Automated current test FAILED: ${root.javaClass.simpleName}: ${root.message ?: "no message"}"
+                )
             } finally {
                 inFlight.set(false)
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
@@ -163,7 +171,7 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
     private fun startStage2Delegate(activity: AppCompatActivity) {
         val delegate = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
             ?: error("Stage-2 cumulative delegate unavailable")
-        invokePrivateStart(delegate)
+        invokePrivateStartOnUiThread(activity, delegate)
         log(activity, "Automated current test: cumulative Stage-2 delegate launched")
     }
 
@@ -173,7 +181,7 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
         val deadline = SystemClock.elapsedRealtime() + DELEGATE_WAIT_MS
         var observedRunning = false
         while (!Thread.currentThread().isInterrupted && SystemClock.elapsedRealtime() < deadline) {
-            val current = delegate.text?.toString().orEmpty()
+            val current = readTextOnUiThread(activity, delegate)
             if (current.contains("running", ignoreCase = true)) observedRunning = true
             if (observedRunning && !current.contains("running", ignoreCase = true)) return
             Thread.sleep(DELEGATE_POLL_MS)
@@ -210,11 +218,56 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
         }
     }
 
+    private fun invokePrivateStartOnUiThread(activity: AppCompatActivity, target: Any, vararg args: String) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            invokePrivateStart(target, *args)
+            return
+        }
+
+        val failure = AtomicReference<Throwable?>(null)
+        val latch = CountDownLatch(1)
+        activity.runOnUiThread {
+            try {
+                invokePrivateStart(target, *args)
+            } catch (t: Throwable) {
+                failure.set(t)
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await()
+        failure.get()?.let { throw unwrapInvocationFailure(it) }
+    }
+
     private fun invokePrivateStart(target: Any, vararg args: String) {
         val parameterTypes = Array(args.size) { String::class.java }
         val method = target.javaClass.getDeclaredMethod("start", *parameterTypes)
         method.isAccessible = true
-        method.invoke(target, *args)
+        try {
+            method.invoke(target, *args)
+        } catch (t: InvocationTargetException) {
+            throw unwrapInvocationFailure(t)
+        }
+    }
+
+    private fun readTextOnUiThread(activity: AppCompatActivity, view: TextView): String {
+        if (Looper.myLooper() == Looper.getMainLooper()) return view.text?.toString().orEmpty()
+        val value = AtomicReference("")
+        val latch = CountDownLatch(1)
+        activity.runOnUiThread {
+            value.set(view.text?.toString().orEmpty())
+            latch.countDown()
+        }
+        latch.await()
+        return value.get()
+    }
+
+    private fun unwrapInvocationFailure(t: Throwable): Throwable {
+        var current = t
+        while (current is InvocationTargetException && current.targetException != null) {
+            current = current.targetException
+        }
+        return current
     }
 
     private fun activity(): AppCompatActivity? {
