@@ -39,6 +39,21 @@
             android:text="When enabled, iDeviceRestore also checks beta/RC firmware indexes and only considers builds currently reported as signed."
             android:textSize="14sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Diagnostics"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/openBootDiagnosticsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Open Boot Diagnostics" />
+
         <Button
             android:id="@+id/doneButton"
             android:layout_width="match_parent"
