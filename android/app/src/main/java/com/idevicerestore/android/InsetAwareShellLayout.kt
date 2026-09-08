@@ -31,6 +31,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
     private val baseRight = paddingRight
     private val baseBottom = paddingBottom
     private var homeModeBadge: TextView? = null
+    private var homeModeValue: TextView? = null
 
     private val referenceStateMirror = object : Runnable {
         override fun run() {
@@ -82,19 +83,27 @@ class InsetAwareShellLayout @JvmOverloads constructor(
             identifierView?.text = "Connect a device in Recovery or DFU"
         }
 
+        val modeText = when {
+            status.contains("RECOVERY", ignoreCase = true) -> "Recovery Mode"
+            status.contains("DFU", ignoreCase = true) -> "DFU Mode"
+            status.startsWith("No Apple USB", ignoreCase = true) || status.isBlank() -> "No Device"
+            else -> "Apple Device"
+        }
+        homeModeValue?.text = if (modeText == "No Device") "○ No Device" else "● $modeText"
+
         homeModeBadge?.let { badge ->
-            when {
-                status.contains("RECOVERY", ignoreCase = true) -> {
+            when (modeText) {
+                "Recovery Mode" -> {
                     badge.text = "●  Recovery Mode"
                     badge.setTextColor(ContextCompat.getColor(context, R.color.mock_success))
                     badge.setBackgroundResource(R.drawable.mock_reference_status_pill)
                 }
-                status.contains("DFU", ignoreCase = true) -> {
+                "DFU Mode" -> {
                     badge.text = "●  DFU Mode"
                     badge.setTextColor(ContextCompat.getColor(context, R.color.mock_primary))
                     badge.setBackgroundResource(R.drawable.mock_reference_card)
                 }
-                status.startsWith("No Apple USB", ignoreCase = true) || status.isBlank() -> {
+                "No Device" -> {
                     badge.text = "○  No Device"
                     badge.setTextColor(ContextCompat.getColor(context, R.color.mock_text_secondary))
                     badge.setBackgroundResource(R.drawable.mock_reference_card)
@@ -159,8 +168,9 @@ class InsetAwareShellLayout @JvmOverloads constructor(
                 view.progress = 0
             }
 
-            is TextView -> if (view.text?.toString() == "●  Recovery Mode" && homeModeBadge == null) {
-                homeModeBadge = view
+            is TextView -> if (view.text?.toString() == "● Recovery Mode" || view.text?.toString() == "●  Recovery Mode") {
+                if (homeModeBadge == null && view.background != null) homeModeBadge = view
+                else if (homeModeValue == null) homeModeValue = view
             }
         }
 
