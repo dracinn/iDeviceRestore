@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1, followed by
- * RestoreRamDisk upload and activation. DeviceTree, SEP, KernelCache, bootx, and persistent restore
- * state changes remain deliberately excluded.
+ * RestoreRamDisk upload/activation and RestoreDeviceTree upload/activation. SEP, KernelCache,
+ * bootx, and persistent restore state changes remain deliberately excluded.
  */
 class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
     context: Context,
@@ -65,13 +65,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
         AlertDialog.Builder(activity)
-            .setTitle("Run Stage-2 firmware + ramdisk activation test?")
+            .setTitle("Run Stage-2 ramdisk + DeviceTree activation test?")
             .setMessage(
-                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads the personalized RestoreRamDisk, treats upstream 'getenv ramdisk-delay' as best-effort, then sends 'ramdisk', waits 2 seconds, and records the resulting iBoot state. " +
-                    "It does not send setenv, saveenv, RestoreLogo, DeviceTree, SEP, KernelCache, boot arguments, bootx, restore, or erase."
+                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads and activates RestoreRamDisk, then mirrors upstream by uploading RestoreDeviceTree and sending 'devicetree'. " +
+                    "It stops before SEP and does not send setenv, saveenv, RestoreLogo, RestoreSEP, KernelCache, boot arguments, bootx, restore, or erase."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Run bounded activation test") { _, _ -> start() }
+            .setPositiveButton("Run bounded DeviceTree test") { _, _ -> start() }
             .show()
     }
 
@@ -82,7 +82,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         text = RUNNING_LABEL
         log(
             activity,
-            "Stage-2 firmware+ramdisk activation test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk upload+ramdisk activation; forbidden=setenv/saveenv/logo/devicetree/SEP/kernel/bootargs/bootx/restore/erase"
+            "Stage-2 firmware+ramdisk+devicetree activation test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk upload+ramdisk then RestoreDeviceTree upload+devicetree; forbidden=setenv/saveenv/logo/SEP/kernel/bootargs/bootx/restore/erase"
         )
 
         worker.execute {
@@ -106,7 +106,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 }
                 require(foundationMatchesDevice(ticket.foundation, recovery)) { "Recovery device does not match TSS foundation" }
 
-                val identity = IpswBuildIdentityReader { message -> log(activity, "Stage-2 firmware+ramdisk $message") }
+                val identity = IpswBuildIdentityReader { message -> log(activity, "Stage-2 restore-entry $message") }
                     .read(firmware.location.file, ticket.identityIndex)
                     .identity
                 val manifest = identity.dict("Manifest") ?: error("Selected BuildIdentity has no Manifest dictionary")
@@ -128,7 +128,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                     name.takeIf { loaded && !stage1 }
                 }
                 require(forbiddenLoaded.isEmpty()) {
-                    "Safety boundary refuses manifest entries reserved for later restore phases: ${forbiddenLoaded.joinToString(",")}"
+                    "Safety boundary refuses later-phase components in the firmware batch: ${forbiddenLoaded.joinToString(",")}"
                 }
 
                 val preparedByName = prepared.components.associateBy { it.name }
@@ -154,6 +154,17 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                     "RestoreRamDisk personalized file is missing, empty, or changed"
                 }
                 PersonalizedImage4Validator.validate(ramdiskFile, ticket.apImg4Ticket, RESTORE_RAMDISK)
+
+                val deviceTree = preparedByName[RESTORE_DEVICE_TREE] ?: error("Prepared RestoreDeviceTree unavailable")
+                val deviceTreeFile = deviceTree.personalizedFile ?: error("Personalized RestoreDeviceTree unavailable")
+                require(deviceTree.image4Validated) { "RestoreDeviceTree failed local Image4 validation" }
+                require(deviceTree.personalizationState == "personalized") {
+                    "RestoreDeviceTree is not fully personalized: ${deviceTree.personalizationState}"
+                }
+                require(deviceTreeFile.isFile && deviceTreeFile.length() > 0L && deviceTree.personalizedBytes == deviceTreeFile.length()) {
+                    "RestoreDeviceTree personalized file is missing, empty, or changed"
+                }
+                PersonalizedImage4Validator.validate(deviceTreeFile, ticket.apImg4Ticket, RESTORE_DEVICE_TREE)
 
                 log(activity, "Stage-2 firmware batch manifest order (${orderedNames.size})=${orderedNames.joinToString(",")}")
 
@@ -190,7 +201,6 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                     verifyStableStage2(command, buildBefore, "after $name")
                     log(activity, "Stage-2 firmware batch VERIFIED ${index + 1}/${orderedPrepared.size}: $name boot-stage=2 build-version=$buildBefore auto-boot=true")
                 }
-
                 log(activity, "Stage-2 firmware batch test: PASS components=${orderedPrepared.size} boot-stage=2 build-version=$buildBefore auto-boot=true")
 
                 val ramdiskSizeRaw = runCatching { command.getenv("ramdisk-size").value.trim() }.getOrNull()
@@ -200,10 +210,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                         "Prepared RestoreRamDisk (${ramdiskFile.length()} bytes) exceeds device ramdisk-size=$ramdiskSizeRaw"
                     }
                 }
-                log(
-                    activity,
-                    "Stage-2 RestoreRamDisk preflight: boot-stage=2 build-version=$buildBefore auto-boot=true ramdisk-size=${ramdiskSizeRaw ?: "unavailable"} bytes=${ramdiskFile.length()} activation=YES"
-                )
+                log(activity, "Stage-2 RestoreRamDisk preflight: boot-stage=2 build-version=$buildBefore auto-boot=true ramdisk-size=${ramdiskSizeRaw ?: "unavailable"} bytes=${ramdiskFile.length()} activation=YES")
 
                 val ramdiskUpload = FileInputStream(ramdiskFile).use { input ->
                     RecoveryUploadTransport(connection, bulkOut).sendStream(input, ramdiskFile.length())
@@ -224,14 +231,9 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
 
                 log(activity, "Stage-2 RestoreRamDisk activation precommand START: getenv ramdisk-delay bestEffort=true")
                 runCatching { command.sendCommand("getenv ramdisk-delay") }
-                    .onSuccess { bytes ->
-                        log(activity, "Stage-2 RestoreRamDisk activation precommand COMPLETE: getenv ramdisk-delay bytes=$bytes bestEffort=true")
-                    }
+                    .onSuccess { bytes -> log(activity, "Stage-2 RestoreRamDisk activation precommand COMPLETE: getenv ramdisk-delay bytes=$bytes bestEffort=true") }
                     .onFailure { error ->
-                        log(
-                            activity,
-                            "Stage-2 RestoreRamDisk activation precommand FAILED-BEST-EFFORT: getenv ramdisk-delay ${error.javaClass.simpleName}: ${error.message}; continuing to ramdisk per upstream semantics"
-                        )
+                        log(activity, "Stage-2 RestoreRamDisk activation precommand FAILED-BEST-EFFORT: getenv ramdisk-delay ${error.javaClass.simpleName}: ${error.message}; continuing to ramdisk per upstream semantics")
                     }
 
                 log(activity, "Stage-2 RestoreRamDisk activation command START: ramdisk")
@@ -243,35 +245,46 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 val observedBuild = observeGetenv(command, "build-version")
                 val observedAutoBoot = observeGetenv(command, "auto-boot")
                 val observedRamdiskSize = observeGetenv(command, "ramdisk-size")
-                log(
-                    activity,
-                    "Stage-2 RestoreRamDisk activation observation: boot-stage=$observedStage build-version=$observedBuild auto-boot=$observedAutoBoot ramdisk-size=$observedRamdiskSize"
-                )
+                log(activity, "Stage-2 RestoreRamDisk activation observation: boot-stage=$observedStage build-version=$observedBuild auto-boot=$observedAutoBoot ramdisk-size=$observedRamdiskSize")
+                requireObservedStable(observedStage, observedBuild, observedAutoBoot, buildBefore, "ramdisk activation")
 
-                if (observedStage != "unavailable") {
-                    require(observedStage == STAGE_2) { "Unexpected boot-stage after ramdisk activation: '$observedStage'" }
+                verifyStableStage2(command, buildBefore, "before RestoreDeviceTree upload")
+                log(activity, "Stage-2 RestoreDeviceTree preflight: boot-stage=2 build-version=$buildBefore auto-boot=true bytes=${deviceTreeFile.length()} command=devicetree")
+                val deviceTreeUpload = FileInputStream(deviceTreeFile).use { input ->
+                    RecoveryUploadTransport(connection, bulkOut).sendStream(input, deviceTreeFile.length())
                 }
-                if (observedBuild != "unavailable") {
-                    require(observedBuild == buildBefore) {
-                        "Unexpected build-version after ramdisk activation: expected='$buildBefore' actual='$observedBuild'"
-                    }
-                }
-                if (observedAutoBoot != "unavailable") {
-                    require(observedAutoBoot.equals("true", ignoreCase = true)) {
-                        "Unexpected auto-boot after ramdisk activation: '$observedAutoBoot'"
-                    }
-                }
+                log(
+                    activity,
+                    "Stage-2 RestoreDeviceTree upload COMPLETE: bytes=${deviceTreeUpload.bytesSent} packets=${deviceTreeUpload.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s"
+                        .format(
+                            deviceTreeUpload.endpointAddress,
+                            deviceTreeUpload.initResult?.toString() ?: "unknown",
+                            deviceTreeUpload.initElapsedMs?.toString() ?: "unknown"
+                        )
+                )
+                verifyStableStage2(command, buildBefore, "after RestoreDeviceTree upload")
+                log(activity, "Stage-2 RestoreDeviceTree post-upload verification PASS: boot-stage=2 build-version=$buildBefore auto-boot=true")
+
+                log(activity, "Stage-2 RestoreDeviceTree activation command START: devicetree")
+                val deviceTreeCommandBytes = command.sendCommand("devicetree")
+                log(activity, "Stage-2 RestoreDeviceTree activation command COMPLETE: devicetree bytes=$deviceTreeCommandBytes upstreamDelayMs=0")
+
+                val deviceTreeStage = observeGetenv(command, "boot-stage")
+                val deviceTreeBuild = observeGetenv(command, "build-version")
+                val deviceTreeAutoBoot = observeGetenv(command, "auto-boot")
+                log(activity, "Stage-2 RestoreDeviceTree activation observation: boot-stage=$deviceTreeStage build-version=$deviceTreeBuild auto-boot=$deviceTreeAutoBoot")
+                requireObservedStable(deviceTreeStage, deviceTreeBuild, deviceTreeAutoBoot, buildBefore, "DeviceTree activation")
 
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk activation test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} ramdiskCommand=SENT observationComplete=true"
+                    "Stage-2 firmware+ramdisk+devicetree activation test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} ramdiskCommand=SENT deviceTreeBytes=${deviceTreeUpload.bytesSent} devicetreeCommand=SENT"
                 )
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk activation test: STOP boundary reached after ramdisk activation; no persistent environment change, DeviceTree/SEP/KernelCache, boot arguments, bootx, restore, or erase sent"
+                    "Stage-2 firmware+ramdisk+devicetree activation test: STOP boundary reached after DeviceTree activation; no persistent environment change, RestoreSEP/rsepfirmware, KernelCache, boot arguments, bootx, restore, or erase sent"
                 )
             } catch (t: Throwable) {
-                log(activity, "Stage-2 firmware+ramdisk activation test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                log(activity, "Stage-2 firmware+ramdisk+devicetree activation test FAILED: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 connection?.close()
                 lease?.let { runCatching { UsbOperationReservation.release(it) } }
@@ -288,6 +301,16 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         require(stage == STAGE_2) { "Stage changed $where: '$stage'" }
         require(autoBoot.equals("true", ignoreCase = true)) { "auto-boot changed $where: '$autoBoot'" }
         require(build == expectedBuild) { "Recovery build changed $where: expected='$expectedBuild' actual='$build'" }
+    }
+
+    private fun requireObservedStable(stage: String, build: String, autoBoot: String, expectedBuild: String, where: String) {
+        if (stage != "unavailable") require(stage == STAGE_2) { "Unexpected boot-stage after $where: '$stage'" }
+        if (build != "unavailable") require(build == expectedBuild) {
+            "Unexpected build-version after $where: expected='$expectedBuild' actual='$build'"
+        }
+        if (autoBoot != "unavailable") require(autoBoot.equals("true", ignoreCase = true)) {
+            "Unexpected auto-boot after $where: '$autoBoot'"
+        }
     }
 
     private fun observeGetenv(command: RecoveryTransport, key: String): String = runCatching {
@@ -341,9 +364,10 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         private const val M1_CPID = "8103"
         private const val STAGE_2 = "2"
         private const val RESTORE_RAMDISK = "RestoreRamDisk"
-        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-activate-test"
-        private const val READY_LABEL = "Test M1 Stage-2 Firmware + RamDisk Activation"
-        private const val RUNNING_LABEL = "Stage-2 firmware + ramdisk activation running…"
+        private const val RESTORE_DEVICE_TREE = "RestoreDeviceTree"
+        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-devicetree-activate-test"
+        private const val READY_LABEL = "Test M1 Stage-2 Through DeviceTree Activation"
+        private const val RUNNING_LABEL = "Stage-2 DeviceTree activation running…"
         private val FORBIDDEN_COMPONENTS = setOf(
             "RestoreLogo",
             "RestoreRamDisk",
