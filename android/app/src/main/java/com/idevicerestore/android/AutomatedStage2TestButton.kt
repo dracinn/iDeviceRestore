@@ -1,0 +1,244 @@
+package com.idevicerestore.android
+
+import android.content.Context
+import android.content.ContextWrapper
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.os.SystemClock
+import android.util.AttributeSet
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.AppCompatButton
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * User-facing current restore-entry test orchestrator.
+ *
+ * From DFU, one confirmation automatically starts the proven pre-armed DFU -> Stage-2 engine,
+ * waits for the exact fresh custom Stage-2 build, then immediately starts the existing cumulative
+ * Stage-2 restore-entry test. This removes the manual timing race around the short-lived custom
+ * Stage-2 Recovery window while keeping the proven boot and Stage-2 implementations separate.
+ */
+class AutomatedStage2TestButton @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : AppCompatButton(context, attrs) {
+    private val worker = Executors.newSingleThreadExecutor()
+    private val inFlight = AtomicBoolean(false)
+
+    private val refresh = object : Runnable {
+        override fun run() {
+            refreshState()
+            if (isAttachedToWindow) postDelayed(this, REFRESH_MS)
+        }
+    }
+
+    init {
+        text = READY_LABEL
+        isEnabled = false
+        setOnClickListener { confirm() }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        post(refresh)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(refresh)
+        worker.shutdownNow()
+        super.onDetachedFromWindow()
+    }
+
+    private fun refreshState() {
+        if (inFlight.get()) {
+            isEnabled = false
+            text = RUNNING_LABEL
+            return
+        }
+        val prearmed = rootView.findViewById<PrearmedStage1IbecButton?>(R.id.prearmedStage1IbecButton)
+        val stage2 = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
+        isEnabled = prearmed?.isEnabled == true || stage2?.isEnabled == true
+        text = READY_LABEL
+    }
+
+    private fun confirm() {
+        val activity = activity() ?: return
+        if (!isEnabled || inFlight.get()) return
+
+        val stage2Delegate = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
+        val directStage2 = stage2Delegate?.isEnabled == true
+        val message = if (directStage2) {
+            "This will run the current cumulative M1 restore-entry test immediately from the connected custom Stage-2 Recovery environment. It stops before restored/usbmux restore payload traffic or erase operations."
+        } else {
+            "This single confirmation will automatically run the proven M1 DFU → iBSS → Stage-1 prerequisites → iBEC/go → fresh Stage-2 chain, then immediately continue into the current cumulative Stage-2 restore-entry test. No second button press is needed. The test stops before restored/usbmux restore payload traffic or erase operations."
+        }
+
+        AlertDialog.Builder(activity)
+            .setTitle("Run automated current restore-entry test?")
+            .setMessage(message)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Run current test") { _, _ -> start(directStage2) }
+            .show()
+    }
+
+    private fun start(directStage2: Boolean) {
+        val activity = activity() ?: return
+        if (!inFlight.compareAndSet(false, true)) return
+        isEnabled = false
+        text = RUNNING_LABEL
+
+        worker.execute {
+            try {
+                if (directStage2) {
+                    log(activity, "Automated current test: custom Stage-2 already connected; starting cumulative restore-entry delegate immediately")
+                    startStage2Delegate(activity)
+                    waitForStage2DelegateCompletion(activity)
+                    return@execute
+                }
+
+                val ibss = Image4PreparationStore.get() ?: error("Personalized iBSS unavailable")
+                val expectedStage1Build = Stage1BuildMetadata.expectedBuild(ibss.result.file)
+                    ?: error("Prepared iBSS Stage-1 build unavailable")
+                val prepared = RestoreComponentPreparationStore.get() ?: error("Prepared restore components unavailable")
+                val ibecFile = prepared.components.firstOrNull { it.name == "iBEC" }?.personalizedFile
+                    ?: error("Personalized iBEC unavailable")
+                val expectedStage2Build = Stage1BuildMetadata.expectedBuild(ibecFile)
+                    ?: error("Prepared iBEC Stage-2 build unavailable")
+
+                log(
+                    activity,
+                    "Automated current test: START DFU-to-current-boundary expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build; manual Stage-2 handoff eliminated"
+                )
+
+                val prearmed = rootView.findViewById<PrearmedStage1IbecButton?>(R.id.prearmedStage1IbecButton)
+                    ?: error("Pre-armed Stage-2 delegate unavailable")
+                invokePrivateStart(prearmed, expectedStage1Build, expectedStage2Build)
+
+                val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
+                val deadline = SystemClock.elapsedRealtime() + STAGE2_WAIT_MS
+                var stage2SeenAt: Long? = null
+
+                while (!Thread.currentThread().isInterrupted && SystemClock.elapsedRealtime() < deadline) {
+                    val stage2 = findExpectedStage2(usb, expectedStage2Build)
+                    if (stage2 != null) {
+                        if (stage2SeenAt == null) {
+                            stage2SeenAt = SystemClock.elapsedRealtime()
+                            log(
+                                activity,
+                                "Automated current test: fresh custom Stage-2 detected device=${stage2.deviceName} build-version=$expectedStage2Build; waiting only for pre-armed reservation release"
+                            )
+                        }
+
+                        if (!UsbOperationReservation.isReserved()) {
+                            val handoffMs = (SystemClock.elapsedRealtime() - (stage2SeenAt ?: SystemClock.elapsedRealtime())).coerceAtLeast(0L)
+                            log(activity, "Automated current test: Stage-2 handoff START latencyMs=$handoffMs; invoking cumulative restore-entry delegate without user input")
+                            startStage2Delegate(activity)
+                            waitForStage2DelegateCompletion(activity)
+                            log(activity, "Automated current test: cumulative delegate returned; automated handoff complete")
+                            return@execute
+                        }
+                    }
+                    Thread.sleep(HANDOFF_POLL_MS)
+                }
+
+                error("Timed out waiting for the exact custom Stage-2 environment and reservation handoff")
+            } catch (t: Throwable) {
+                log(activity, "Automated current test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                inFlight.set(false)
+                activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
+            }
+        }
+    }
+
+    private fun startStage2Delegate(activity: AppCompatActivity) {
+        val delegate = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
+            ?: error("Stage-2 cumulative delegate unavailable")
+        invokePrivateStart(delegate)
+        log(activity, "Automated current test: cumulative Stage-2 delegate launched")
+    }
+
+    private fun waitForStage2DelegateCompletion(activity: AppCompatActivity) {
+        val delegate = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
+            ?: return
+        val deadline = SystemClock.elapsedRealtime() + DELEGATE_WAIT_MS
+        var observedRunning = false
+        while (!Thread.currentThread().isInterrupted && SystemClock.elapsedRealtime() < deadline) {
+            val current = delegate.text?.toString().orEmpty()
+            if (current.contains("running", ignoreCase = true)) observedRunning = true
+            if (observedRunning && !current.contains("running", ignoreCase = true)) return
+            Thread.sleep(DELEGATE_POLL_MS)
+        }
+        if (observedRunning) {
+            log(activity, "Automated current test: delegate completion observation timed out; consult current Stage-2 logs for final boundary result")
+        }
+    }
+
+    private fun findExpectedStage2(usb: UsbManager, expectedBuild: String): UsbDevice? {
+        return usb.deviceList.values.firstOrNull { device ->
+            if (
+                device.vendorId != AppleUsb.APPLE_VID ||
+                AppleUsb.mode(device) != AppleUsb.Mode.RECOVERY ||
+                !usb.hasPermission(device) ||
+                !AppleUsb.bootIdentifiers(device)?.cpidHex.equals(M1_CPID, ignoreCase = true)
+            ) {
+                return@firstOrNull false
+            }
+
+            var connection: android.hardware.usb.UsbDeviceConnection? = null
+            try {
+                connection = usb.openDevice(device) ?: return@firstOrNull false
+                val claimed = AppleUsb.claimBestInterface(device, connection) ?: return@firstOrNull false
+                val command = RecoveryTransport(connection, claimed.bulkIn)
+                val stage = command.getenv("boot-stage").value.trim()
+                val build = command.getenv("build-version").value.trim()
+                stage == STAGE_2 && build == expectedBuild
+            } catch (_: Throwable) {
+                false
+            } finally {
+                connection?.close()
+            }
+        }
+    }
+
+    private fun invokePrivateStart(target: Any, vararg args: String) {
+        val parameterTypes = Array(args.size) { String::class.java }
+        val method = target.javaClass.getDeclaredMethod("start", *parameterTypes)
+        method.isAccessible = true
+        method.invoke(target, *args)
+    }
+
+    private fun activity(): AppCompatActivity? {
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is AppCompatActivity) return current
+            current = current.baseContext
+        }
+        return current as? AppCompatActivity
+    }
+
+    private fun log(activity: AppCompatActivity, message: String) = activity.runOnUiThread {
+        val delivered = runCatching {
+            val method = activity.javaClass.getDeclaredMethod("log", String::class.java)
+            method.isAccessible = true
+            method.invoke(activity, message)
+            true
+        }.getOrDefault(false)
+        if (!delivered) activity.findViewById<TextView?>(R.id.logView)?.append(message.trimEnd() + "\n")
+    }
+
+    companion object {
+        private const val REFRESH_MS = 500L
+        private const val HANDOFF_POLL_MS = 25L
+        private const val DELEGATE_POLL_MS = 100L
+        private const val STAGE2_WAIT_MS = 150_000L
+        private const val DELEGATE_WAIT_MS = 360_000L
+        private const val M1_CPID = "8103"
+        private const val STAGE_2 = "2"
+        private const val READY_LABEL = "Run Current Stage-2 Test"
+        private const val RUNNING_LABEL = "Automated current test running…"
+    }
+}
