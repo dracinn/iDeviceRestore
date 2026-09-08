@@ -309,6 +309,14 @@
                     android:layout_marginTop="8dp"
                     android:enabled="false"
                     android:text="Preflight M1 Stage-2 Restore Entry (read-only)" />
+
+                <com.idevicerestore.android.Stage2RestoreLogoTestButton
+                    android:id="@+id/stage2RestoreLogoTestButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Test M1 Stage-2 RestoreLogo" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
