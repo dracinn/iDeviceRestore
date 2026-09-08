@@ -14,8 +14,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1, followed by a
- * RestoreRamDisk upload-only checkpoint. The ramdisk activation command is deliberately excluded.
+ * Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1, followed by
+ * RestoreRamDisk upload and activation. DeviceTree, SEP, KernelCache, bootx, and persistent restore
+ * state changes remain deliberately excluded.
  */
 class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
     context: Context,
@@ -56,9 +57,6 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         }
         val activity = activity() ?: run { isEnabled = false; return }
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
-        // UI readiness is intentionally based only on the live USB mode. TSS/preparation/cache
-        // prerequisites are verified again at execution time so stale app state cannot silently hide
-        // a valid Stage-2 hardware diagnostic.
         isEnabled = permittedM1Recovery(usb) != null
         text = READY_LABEL
     }
@@ -67,13 +65,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
         AlertDialog.Builder(activity)
-            .setTitle("Run Stage-2 firmware + ramdisk upload test?")
+            .setTitle("Run Stage-2 firmware + ramdisk activation test?")
             .setMessage(
-                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the non-Stage1 IsLoadedByiBoot firmware batch with the upstream 'firmware' command, verifies Stage 2 after every component, then uploads the prepared personalized RestoreRamDisk into memory. " +
-                    "The RestoreRamDisk is NOT activated: the 'ramdisk' command is not sent. It also does not send setenv, saveenv, RestoreLogo, DeviceTree, SEP, KernelCache, bootx, restore, or erase."
+                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads the personalized RestoreRamDisk, sends upstream 'getenv ramdisk-delay' and then 'ramdisk', waits 2 seconds, and records the resulting iBoot state. " +
+                    "It does not send setenv, saveenv, RestoreLogo, DeviceTree, SEP, KernelCache, boot arguments, bootx, restore, or erase."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Run bounded test") { _, _ -> start() }
+            .setPositiveButton("Run bounded activation test") { _, _ -> start() }
             .show()
     }
 
@@ -84,7 +82,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         text = RUNNING_LABEL
         log(
             activity,
-            "Stage-2 firmware+ramdisk test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk-upload-only; forbidden=setenv/saveenv/logo/ramdisk-command/devicetree/SEP/kernel/bootx/restore/erase"
+            "Stage-2 firmware+ramdisk activation test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk upload+ramdisk activation; forbidden=setenv/saveenv/logo/devicetree/SEP/kernel/bootargs/bootx/restore/erase"
         )
 
         worker.execute {
@@ -189,7 +187,6 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                                 upload.initElapsedMs?.toString() ?: "unknown"
                             )
                     )
-
                     verifyStableStage2(command, buildBefore, "after $name")
                     log(activity, "Stage-2 firmware batch VERIFIED ${index + 1}/${orderedPrepared.size}: $name boot-stage=2 build-version=$buildBefore auto-boot=true")
                 }
@@ -205,7 +202,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 }
                 log(
                     activity,
-                    "Stage-2 RestoreRamDisk preflight: boot-stage=2 build-version=$buildBefore auto-boot=true ramdisk-size=${ramdiskSizeRaw ?: "unavailable"} bytes=${ramdiskFile.length()} activation=NO"
+                    "Stage-2 RestoreRamDisk preflight: boot-stage=2 build-version=$buildBefore auto-boot=true ramdisk-size=${ramdiskSizeRaw ?: "unavailable"} bytes=${ramdiskFile.length()} activation=YES"
                 )
 
                 val ramdiskUpload = FileInputStream(ramdiskFile).use { input ->
@@ -213,7 +210,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 }
                 log(
                     activity,
-                    "Stage-2 RestoreRamDisk upload COMPLETE: bytes=${ramdiskUpload.bytesSent} packets=${ramdiskUpload.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s ramdiskCommand=NOT-SENT"
+                    "Stage-2 RestoreRamDisk upload COMPLETE: bytes=${ramdiskUpload.bytesSent} packets=${ramdiskUpload.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s"
                         .format(
                             ramdiskUpload.endpointAddress,
                             ramdiskUpload.initResult?.toString() ?: "unknown",
@@ -222,16 +219,46 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 )
 
                 verifyStableStage2(command, buildBefore, "after RestoreRamDisk upload")
+
+                val delayQueryBytes = command.sendCommand("getenv ramdisk-delay")
+                log(activity, "Stage-2 RestoreRamDisk activation precommand COMPLETE: getenv ramdisk-delay bytes=$delayQueryBytes")
+                val ramdiskCommandBytes = command.sendCommand("ramdisk")
+                log(activity, "Stage-2 RestoreRamDisk activation command COMPLETE: ramdisk bytes=$ramdiskCommandBytes; settling ${RAMDISK_SETTLE_MS}ms")
+                Thread.sleep(RAMDISK_SETTLE_MS)
+
+                val observedStage = observeGetenv(command, "boot-stage")
+                val observedBuild = observeGetenv(command, "build-version")
+                val observedAutoBoot = observeGetenv(command, "auto-boot")
+                val observedRamdiskSize = observeGetenv(command, "ramdisk-size")
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} boot-stage=2 build-version=$buildBefore auto-boot=true ramdiskCommand=NOT-SENT"
+                    "Stage-2 RestoreRamDisk activation observation: boot-stage=$observedStage build-version=$observedBuild auto-boot=$observedAutoBoot ramdisk-size=$observedRamdiskSize"
+                )
+
+                if (observedStage != "unavailable") {
+                    require(observedStage == STAGE_2) { "Unexpected boot-stage after ramdisk activation: '$observedStage'" }
+                }
+                if (observedBuild != "unavailable") {
+                    require(observedBuild == buildBefore) {
+                        "Unexpected build-version after ramdisk activation: expected='$buildBefore' actual='$observedBuild'"
+                    }
+                }
+                if (observedAutoBoot != "unavailable") {
+                    require(observedAutoBoot.equals("true", ignoreCase = true)) {
+                        "Unexpected auto-boot after ramdisk activation: '$observedAutoBoot'"
+                    }
+                }
+
+                log(
+                    activity,
+                    "Stage-2 firmware+ramdisk activation test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} ramdiskCommand=SENT observationComplete=true"
                 )
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk test: STOP boundary reached after RestoreRamDisk upload with no activation; no persistent environment change, DeviceTree/SEP/KernelCache, bootx, restore, or erase sent"
+                    "Stage-2 firmware+ramdisk activation test: STOP boundary reached after ramdisk activation; no persistent environment change, DeviceTree/SEP/KernelCache, boot arguments, bootx, restore, or erase sent"
                 )
             } catch (t: Throwable) {
-                log(activity, "Stage-2 firmware+ramdisk test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                log(activity, "Stage-2 firmware+ramdisk activation test FAILED: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 connection?.close()
                 lease?.let { runCatching { UsbOperationReservation.release(it) } }
@@ -249,6 +276,10 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         require(autoBoot.equals("true", ignoreCase = true)) { "auto-boot changed $where: '$autoBoot'" }
         require(build == expectedBuild) { "Recovery build changed $where: expected='$expectedBuild' actual='$build'" }
     }
+
+    private fun observeGetenv(command: RecoveryTransport, key: String): String = runCatching {
+        command.getenv(key).value.trim().ifEmpty { "empty" }
+    }.getOrElse { "unavailable" }
 
     private fun parseUnsignedNumber(raw: String?): ULong? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -293,12 +324,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
 
     companion object {
         private const val REFRESH_MS = 1000L
+        private const val RAMDISK_SETTLE_MS = 2000L
         private const val M1_CPID = "8103"
         private const val STAGE_2 = "2"
         private const val RESTORE_RAMDISK = "RestoreRamDisk"
-        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-test"
-        private const val READY_LABEL = "Test M1 Stage-2 Firmware + RamDisk Upload"
-        private const val RUNNING_LABEL = "Stage-2 firmware + ramdisk test running…"
+        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-activate-test"
+        private const val READY_LABEL = "Test M1 Stage-2 Firmware + RamDisk Activation"
+        private const val RUNNING_LABEL = "Stage-2 firmware + ramdisk activation running…"
         private val FORBIDDEN_COMPONENTS = setOf(
             "RestoreLogo",
             "RestoreRamDisk",
