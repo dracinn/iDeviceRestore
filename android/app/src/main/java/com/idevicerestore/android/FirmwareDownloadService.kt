@@ -50,6 +50,7 @@ class FirmwareDownloadService : Service() {
         val url = intent.getStringExtra(EXTRA_URL) ?: return fail("Missing firmware URL")
         val destinationPath = intent.getStringExtra(EXTRA_DESTINATION) ?: return fail("Missing firmware destination")
         val expectedSize = intent.getLongExtra(EXTRA_EXPECTED_SIZE, -1L)
+        val expectedSha1 = intent.getStringExtra(EXTRA_SHA1)?.trim()?.takeIf { it.isNotBlank() }
         val version = intent.getStringExtra(EXTRA_VERSION).orEmpty()
         val buildId = intent.getStringExtra(EXTRA_BUILD_ID).orEmpty()
         val destination = File(destinationPath)
@@ -59,27 +60,56 @@ class FirmwareDownloadService : Service() {
         }
 
         if (destination.isFile && (expectedSize <= 0L || destination.length() == expectedSize)) {
+            val validExisting = runCatching {
+                if (expectedSha1 != null) {
+                    FirmwareIntegrity.verifySha1(destination, expectedSha1).matches
+                } else {
+                    FirmwareIntegrity.validateIpswArchive(destination)
+                    true
+                }
+            }.getOrElse { error ->
+                broadcastState(
+                    STATE_LOG,
+                    message = "FirmwareDownloadService: existing firmware validation failed: ${error.javaClass.simpleName}: ${error.message}"
+                )
+                false
+            }
+            if (validExisting) {
+                broadcastState(
+                    STATE_READY,
+                    downloaded = destination.length(),
+                    total = expectedSize,
+                    message = "Firmware already present and verified"
+                )
+                stopSelf()
+                return
+            }
+            val removed = destination.delete()
+            if (!removed && destination.exists()) {
+                return fail("Existing firmware is invalid and could not be removed")
+            }
             broadcastState(
-                STATE_READY,
-                downloaded = destination.length(),
-                total = expectedSize,
-                message = "Firmware already present and ready"
+                STATE_LOG,
+                message = "FirmwareDownloadService: removed invalid existing firmware; restarting network download"
             )
-            stopSelf()
-            return
         }
 
         val part = File(destination.absolutePath + ".part")
         val adaptiveMeta = File(destination.absolutePath + ".part.meta")
+        val adaptiveMetaTemp = File(destination.absolutePath + ".part.meta.tmp")
         // Adaptive .part files are preallocated to the final length, so their file length is not a
         // valid resume-progress measurement. The first adaptive callback supplies the bitmap-derived
-        // completed byte count immediately after startup.
-        val resumedBytes = if (adaptiveMeta.isFile) {
+        // completed byte count immediately after startup. Treat either committed or temporary
+        // adaptive metadata as authoritative evidence that logical .part length is unsafe.
+        val resumedBytes = if (adaptiveMeta.isFile || adaptiveMetaTemp.isFile) {
             0L
         } else {
             part.takeIf { it.isFile }
                 ?.length()
-                ?.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
+                ?.let { length ->
+                    if (expectedSize > 0L && length >= expectedSize) 0L
+                    else length.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
+                }
                 ?: 0L
         }
         startAsForeground(version, buildId, resumedBytes, expectedSize, 0)
@@ -97,7 +127,7 @@ class FirmwareDownloadService : Service() {
             url = url,
             destination = destination,
             expectedSize = expectedSize,
-            expectedSha1 = intent.getStringExtra(EXTRA_SHA1),
+            expectedSha1 = expectedSha1,
             connections = MAX_ADAPTIVE_CONNECTIONS
         )
 
@@ -131,7 +161,7 @@ class FirmwareDownloadService : Service() {
                     STATE_READY,
                     downloaded = result.bytes,
                     total = result.bytes,
-                    message = "Firmware download complete and ready"
+                    message = "Firmware download complete and verified"
                 )
                 val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
