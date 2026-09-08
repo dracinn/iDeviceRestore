@@ -81,8 +81,12 @@ object AppleUsb {
         val identifiers = bootIdentifiers(device)
             ?: return if (runCatching { device.serialNumber }.getOrNull().isNullOrBlank()) "USB serial descriptor: unavailable" else "USB serial descriptor: empty"
         return buildString {
-            append("USB serial descriptor: ").append(identifiers.rawSerial)
             val entries = listOf("CPID" to identifiers.cpidHex, "CPRV" to identifiers.cprvHex, "CPFM" to identifiers.cpfmHex, "SCEP" to identifiers.scepHex, "BDID" to identifiers.bdidHex, "ECID" to identifiers.ecidHex, "IBFL" to identifiers.ibflHex, "PREV" to identifiers.prevHex).filter { it.second != null }
+            // Ordinary Apple USB personalities can expose a raw hardware serial with no boot tags.
+            // Do not place that stable identifier into diagnostic buffers at all; otherwise Share
+            // Logs cannot reliably distinguish it from harmless descriptor text after detach.
+            if (entries.isEmpty()) append("USB serial descriptor: [REDACTED]")
+            else append("USB serial descriptor: ").append(identifiers.rawSerial)
             if (entries.isNotEmpty()) {
                 append("\nBoot identifiers:")
                 entries.forEach { (key, value) -> append(" $key=$value") }

@@ -1,0 +1,10 @@
+aria2 / aria2c
+Version: 1.37.0
+Upstream: https://github.com/aria2/aria2
+Android release asset: aria2-1.37.0-aarch64-linux-android-build1.zip
+
+The Android firmware download path invokes the official upstream aria2c executable directly.
+It is not a reimplementation or behavioral clone.
+
+aria2 is distributed under the GNU General Public License version 2 or later, with the OpenSSL linking exception described by upstream.
+License/source information: https://github.com/aria2/aria2/tree/release-1.37.0
