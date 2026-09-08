@@ -3,6 +3,7 @@ package com.idevicerestore.android
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import android.system.Os
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.min
@@ -122,6 +123,21 @@ class FirmwareStorage(
         val part = File(destination.absolutePath + ".part")
         if (!part.isFile) return 0L
 
+        val aria2Control = File(part.absolutePath + ".aria2")
+        if (aria2Control.isFile) {
+            // aria2 split downloads can write high ranges first, so logical file length is not a
+            // progress signal. With --file-allocation=none, filesystem allocated blocks represent
+            // storage already consumed by the sparse partial, which is exactly what the free-space
+            // check needs when calculating how much additional capacity is required to finish.
+            val allocated = allocatedBytes(part)
+            val accounted = firmware.fileSize.takeIf { it > 0L }?.let { min(allocated, it) } ?: allocated
+            logger(
+                "FirmwareStorage: aria2 partial logical=${part.length()} allocated=$allocated " +
+                    "accounted=$accounted control=${aria2Control.name}"
+            )
+            return accounted
+        }
+
         adaptivePartialBytes(destination)?.let { return it }
 
         val hasAdaptiveMetadata = File(destination.absolutePath + ".part.meta").exists() ||
@@ -131,10 +147,17 @@ class FirmwareStorage(
             return 0L
         }
 
-        // A full-length untagged .part is ambiguous because adaptive transfers preallocate their
-        // payload. Never treat logical length alone as completed data for free-space calculations.
+        // A full-length untagged .part is ambiguous because older adaptive transfers preallocated
+        // their payload. Never treat logical length alone as completed data for free-space checks.
         if (firmware.fileSize > 0L && part.length() >= firmware.fileSize) return 0L
         return part.length()
+    }
+
+    private fun allocatedBytes(file: File): Long = runCatching {
+        Math.multiplyExact(Os.stat(file.absolutePath).st_blocks, 512L)
+    }.getOrElse { error ->
+        logger("FirmwareStorage: could not read allocated blocks for ${file.name}: ${error.message}")
+        0L
     }
 
     private fun adaptivePartialBytes(destination: File): Long? {
