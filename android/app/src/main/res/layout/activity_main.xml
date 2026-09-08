@@ -301,6 +301,14 @@
                     android:layout_marginTop="10dp"
                     android:enabled="false"
                     android:text="Run M1 DFU → Stage-2 Test" />
+
+                <com.idevicerestore.android.Stage2RestoreEntryPreflightButton
+                    android:id="@+id/stage2RestoreEntryPreflightButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Preflight M1 Stage-2 Restore Entry (read-only)" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
