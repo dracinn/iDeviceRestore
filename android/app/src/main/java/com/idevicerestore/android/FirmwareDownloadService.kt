@@ -94,33 +94,17 @@ class FirmwareDownloadService : Service() {
             )
         }
 
-        val part = File(destination.absolutePath + ".part")
-        val adaptiveMeta = File(destination.absolutePath + ".part.meta")
-        val adaptiveMetaTemp = File(destination.absolutePath + ".part.meta.tmp")
-        // Adaptive .part files are preallocated to the final length, so their file length is not a
-        // valid resume-progress measurement. The first adaptive callback supplies the bitmap-derived
-        // completed byte count immediately after startup. Treat either committed or temporary
-        // adaptive metadata as authoritative evidence that logical .part length is unsafe.
-        val resumedBytes = if (adaptiveMeta.isFile || adaptiveMetaTemp.isFile) {
-            0L
-        } else {
-            part.takeIf { it.isFile }
-                ?.length()
-                ?.let { length ->
-                    if (expectedSize > 0L && length >= expectedSize) 0L
-                    else length.coerceAtMost(expectedSize.takeIf { it > 0L } ?: Long.MAX_VALUE)
-                }
-                ?: 0L
-        }
-        startAsForeground(version, buildId, resumedBytes, expectedSize, 0)
+        // aria2's own .aria2 control file is authoritative resume state. Because segmented aria2
+        // writes may extend the payload out of order, raw .part length is not used as progress.
+        startAsForeground(version, buildId, 0L, expectedSize, 0)
         broadcastState(
             STATE_RUNNING,
-            downloaded = resumedBytes,
+            downloaded = 0L,
             total = expectedSize,
-            message = "Starting adaptive Apple CDN download"
+            message = "Starting official aria2c Apple CDN download"
         )
 
-        val downloader = AdaptiveFirmwareDownloader(logger = { message ->
+        val downloader = Aria2cFirmwareDownloader(this, logger = { message ->
             broadcastState(STATE_LOG, message = message)
         })
         val request = FirmwareDownloader.Request(
@@ -128,7 +112,7 @@ class FirmwareDownloadService : Service() {
             destination = destination,
             expectedSize = expectedSize,
             expectedSha1 = expectedSha1,
-            connections = MAX_ADAPTIVE_CONNECTIONS
+            connections = MAX_ARIA2_CONNECTIONS
         )
 
         val active = downloader.start(request) { progress ->
@@ -141,8 +125,6 @@ class FirmwareDownloadService : Service() {
                     progress.totalBytes,
                     progress.activeConnections
                 )
-                // Progress is high-frequency UI state, not a diagnostic event. Keep the message empty
-                // so MainActivity updates progress/speed without appending the same log line every 500 ms.
                 broadcastState(
                     STATE_RUNNING,
                     downloaded = progress.downloadedBytes,
@@ -161,7 +143,7 @@ class FirmwareDownloadService : Service() {
                     STATE_READY,
                     downloaded = result.bytes,
                     total = result.bytes,
-                    message = "Firmware download complete and verified"
+                    message = "Firmware download complete and verified by aria2c pipeline"
                 )
                 val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
@@ -222,7 +204,7 @@ class FirmwareDownloadService : Service() {
         activeConnections: Int
     ) = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.stat_sys_download)
-        .setContentTitle("Downloading Apple firmware")
+        .setContentTitle("Downloading Apple firmware with aria2c")
         .setContentText(
             buildString {
                 append("$version ($buildId) — ${formatPercent(downloaded, total)} — ")
@@ -232,9 +214,9 @@ class FirmwareDownloadService : Service() {
         )
         .setSubText(
             if (activeConnections > 0) {
-                "${formatPercent(downloaded, total)} • ${activeConnections} connection(s)"
+                "aria2c • ${formatPercent(downloaded, total)} • ${activeConnections} connection(s)"
             } else {
-                formatPercent(downloaded, total)
+                "aria2c • ${formatPercent(downloaded, total)}"
             }
         )
         .setOnlyAlertOnce(true)
@@ -284,7 +266,7 @@ class FirmwareDownloadService : Service() {
                 "Firmware downloads",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Apple firmware download progress"
+                description = "Apple firmware download progress via aria2c"
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
@@ -292,7 +274,7 @@ class FirmwareDownloadService : Service() {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         handle?.cancel()
-        broadcastState(STATE_FAILED, message = "Android foreground data-sync time limit reached; download can be resumed")
+        broadcastState(STATE_FAILED, message = "Android foreground data-sync time limit reached; aria2c download can be resumed")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(startId)
     }
@@ -325,7 +307,7 @@ class FirmwareDownloadService : Service() {
 
         private const val CHANNEL_ID = "firmware_downloads"
         private const val NOTIFICATION_ID = 4107
-        private const val MAX_ADAPTIVE_CONNECTIONS = 8
+        private const val MAX_ARIA2_CONNECTIONS = 8
 
         fun formatBytes(value: Long): String {
             if (value < 0) return "unknown"
