@@ -76,7 +76,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         logger.log("Boot diagnostic development session started")
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         logger.log("Policy: Boot Diagnostics is the unrestricted development and hardware-test surface; only verified functions are promoted to the main app")
-        logger.log("Individual development tests may define their own prerequisites, confirmations, and stop boundaries while they are being proven")
+        logger.log("Individual development tests may define their own prerequisites, confirmations, and current stop boundaries while they are being proven")
         logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
         runDiagnostic(requestPermission = true)
     }
