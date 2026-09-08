@@ -13,7 +13,10 @@ import java.io.FileInputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1. */
+/**
+ * Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1, followed by a
+ * RestoreRamDisk upload-only checkpoint. The ramdisk activation command is deliberately excluded.
+ */
 class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
@@ -48,20 +51,15 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
     private fun refreshState() {
         if (inFlight.get()) {
             isEnabled = false
-            text = "Stage-2 firmware batch running…"
+            text = RUNNING_LABEL
             return
         }
         val activity = activity() ?: run { isEnabled = false; return }
         val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
-        val recovery = permittedM1Recovery(usb)
-        val ticket = TssTicketStore.get()
-        val prepared = RestoreComponentPreparationStore.get()
-        val firmware = FirmwarePreparationStore.get()
-        isEnabled = recovery != null && ticket != null && prepared != null && firmware != null &&
-            firmware.matches(ticket.buildId, ticket.identityIndex) &&
-            prepared.buildId.equals(ticket.buildId, ignoreCase = true) &&
-            prepared.identityIndex == ticket.identityIndex &&
-            foundationMatchesDevice(ticket.foundation, recovery)
+        // UI readiness is intentionally based only on the live USB mode. TSS/preparation/cache
+        // prerequisites are verified again at execution time so stale app state cannot silently hide
+        // a valid Stage-2 hardware diagnostic.
+        isEnabled = permittedM1Recovery(usb) != null
         text = READY_LABEL
     }
 
@@ -69,13 +67,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
         AlertDialog.Builder(activity)
-            .setTitle("Send Stage-2 iBoot firmware batch?")
+            .setTitle("Run Stage-2 firmware + ramdisk upload test?")
             .setMessage(
-                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It reads the selected BuildIdentity in manifest order, uploads only components marked IsLoadedByiBoot=true and not IsLoadedByiBootStage1=true, and sends the upstream 'firmware' command after each component. " +
-                    "After every component it requires boot-stage=2, the same build-version, and auto-boot=true. It does not send setenv, saveenv, RestoreLogo, RestoreRamDisk, DeviceTree, SEP, KernelCache, bootx, restore, or erase."
+                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the non-Stage1 IsLoadedByiBoot firmware batch with the upstream 'firmware' command, verifies Stage 2 after every component, then uploads the prepared personalized RestoreRamDisk into memory. " +
+                    "The RestoreRamDisk is NOT activated: the 'ramdisk' command is not sent. It also does not send setenv, saveenv, RestoreLogo, DeviceTree, SEP, KernelCache, bootx, restore, or erase."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Run bounded firmware batch") { _, _ -> start() }
+            .setPositiveButton("Run bounded test") { _, _ -> start() }
             .show()
     }
 
@@ -83,8 +81,11 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
-        text = "Stage-2 firmware batch running…"
-        log(activity, "Stage-2 firmware batch test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware-only; forbidden=setenv/saveenv/logo/ramdisk/devicetree/SEP/kernel/bootx/restore/erase")
+        text = RUNNING_LABEL
+        log(
+            activity,
+            "Stage-2 firmware+ramdisk test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk-upload-only; forbidden=setenv/saveenv/logo/ramdisk-command/devicetree/SEP/kernel/bootx/restore/erase"
+        )
 
         worker.execute {
             var lease: UsbOperationReservation.Lease? = null
@@ -95,16 +96,19 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
 
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
                 val recovery = permittedM1Recovery(usb) ?: error("No permitted M1 Recovery device is connected")
-                val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable")
-                val prepared = RestoreComponentPreparationStore.get() ?: error("Prepared restore components unavailable")
-                val firmware = FirmwarePreparationStore.get() ?: error("Firmware preparation context unavailable")
+                val ticket = TssTicketStore.get()
+                    ?: error("TSS ticket unavailable; select/refresh firmware and let automatic preparation complete")
+                val prepared = RestoreComponentPreparationStore.get()
+                    ?: error("Prepared restore components unavailable; let automatic restore preparation complete")
+                val firmware = FirmwarePreparationStore.get()
+                    ?: error("Firmware preparation context unavailable; select the active signed firmware")
                 require(firmware.matches(ticket.buildId, ticket.identityIndex)) { "Firmware/TSS identity mismatch" }
                 require(prepared.buildId.equals(ticket.buildId, ignoreCase = true) && prepared.identityIndex == ticket.identityIndex) {
                     "Prepared restore components/TSS identity mismatch"
                 }
                 require(foundationMatchesDevice(ticket.foundation, recovery)) { "Recovery device does not match TSS foundation" }
 
-                val identity = IpswBuildIdentityReader { message -> log(activity, "Stage-2 firmware batch $message") }
+                val identity = IpswBuildIdentityReader { message -> log(activity, "Stage-2 firmware+ramdisk $message") }
                     .read(firmware.location.file, ticket.identityIndex)
                     .identity
                 val manifest = identity.dict("Manifest") ?: error("Selected BuildIdentity has no Manifest dictionary")
@@ -141,6 +145,18 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                     PersonalizedImage4Validator.validate(file, ticket.apImg4Ticket, name)
                     name to component
                 }
+
+                val ramdisk = preparedByName[RESTORE_RAMDISK] ?: error("Prepared RestoreRamDisk unavailable")
+                val ramdiskFile = ramdisk.personalizedFile ?: error("Personalized RestoreRamDisk unavailable")
+                require(ramdisk.image4Validated) { "RestoreRamDisk failed local Image4 validation" }
+                require(ramdisk.personalizationState == "personalized") {
+                    "RestoreRamDisk is not fully personalized: ${ramdisk.personalizationState}"
+                }
+                require(ramdiskFile.isFile && ramdiskFile.length() > 0L && ramdisk.personalizedBytes == ramdiskFile.length()) {
+                    "RestoreRamDisk personalized file is missing, empty, or changed"
+                }
+                PersonalizedImage4Validator.validate(ramdiskFile, ticket.apImg4Ticket, RESTORE_RAMDISK)
+
                 log(activity, "Stage-2 firmware batch manifest order (${orderedNames.size})=${orderedNames.joinToString(",")}")
 
                 connection = usb.openDevice(recovery) ?: error("Could not open M1 Recovery device")
@@ -174,19 +190,48 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                             )
                     )
 
-                    val stageNow = command.getenv("boot-stage").value.trim()
-                    val autoBootNow = command.getenv("auto-boot").value.trim()
-                    val buildNow = command.getenv("build-version").value.trim()
-                    require(stageNow == STAGE_2) { "Stage changed after $name: '$stageNow'" }
-                    require(autoBootNow.equals("true", ignoreCase = true)) { "auto-boot changed after $name: '$autoBootNow'" }
-                    require(buildNow == buildBefore) { "Recovery build changed after $name: before='$buildBefore' after='$buildNow'" }
-                    log(activity, "Stage-2 firmware batch VERIFIED ${index + 1}/${orderedPrepared.size}: $name boot-stage=2 build-version=$buildNow auto-boot=$autoBootNow")
+                    verifyStableStage2(command, buildBefore, "after $name")
+                    log(activity, "Stage-2 firmware batch VERIFIED ${index + 1}/${orderedPrepared.size}: $name boot-stage=2 build-version=$buildBefore auto-boot=true")
                 }
 
                 log(activity, "Stage-2 firmware batch test: PASS components=${orderedPrepared.size} boot-stage=2 build-version=$buildBefore auto-boot=true")
-                log(activity, "Stage-2 firmware batch test: STOP boundary reached before RestoreRamDisk; no persistent environment change or later restore-entry payload sent")
+
+                val ramdiskSizeRaw = runCatching { command.getenv("ramdisk-size").value.trim() }.getOrNull()
+                val capacity = parseUnsignedNumber(ramdiskSizeRaw)
+                if (capacity != null) {
+                    require(ramdiskFile.length().toULong() <= capacity) {
+                        "Prepared RestoreRamDisk (${ramdiskFile.length()} bytes) exceeds device ramdisk-size=$ramdiskSizeRaw"
+                    }
+                }
+                log(
+                    activity,
+                    "Stage-2 RestoreRamDisk preflight: boot-stage=2 build-version=$buildBefore auto-boot=true ramdisk-size=${ramdiskSizeRaw ?: "unavailable"} bytes=${ramdiskFile.length()} activation=NO"
+                )
+
+                val ramdiskUpload = FileInputStream(ramdiskFile).use { input ->
+                    RecoveryUploadTransport(connection, bulkOut).sendStream(input, ramdiskFile.length())
+                }
+                log(
+                    activity,
+                    "Stage-2 RestoreRamDisk upload COMPLETE: bytes=${ramdiskUpload.bytesSent} packets=${ramdiskUpload.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s ramdiskCommand=NOT-SENT"
+                        .format(
+                            ramdiskUpload.endpointAddress,
+                            ramdiskUpload.initResult?.toString() ?: "unknown",
+                            ramdiskUpload.initElapsedMs?.toString() ?: "unknown"
+                        )
+                )
+
+                verifyStableStage2(command, buildBefore, "after RestoreRamDisk upload")
+                log(
+                    activity,
+                    "Stage-2 firmware+ramdisk test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} boot-stage=2 build-version=$buildBefore auto-boot=true ramdiskCommand=NOT-SENT"
+                )
+                log(
+                    activity,
+                    "Stage-2 firmware+ramdisk test: STOP boundary reached after RestoreRamDisk upload with no activation; no persistent environment change, DeviceTree/SEP/KernelCache, bootx, restore, or erase sent"
+                )
             } catch (t: Throwable) {
-                log(activity, "Stage-2 firmware batch test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                log(activity, "Stage-2 firmware+ramdisk test FAILED: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 connection?.close()
                 lease?.let { runCatching { UsbOperationReservation.release(it) } }
@@ -194,6 +239,22 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
             }
         }
+    }
+
+    private fun verifyStableStage2(command: RecoveryTransport, expectedBuild: String, where: String) {
+        val stage = command.getenv("boot-stage").value.trim()
+        val autoBoot = command.getenv("auto-boot").value.trim()
+        val build = command.getenv("build-version").value.trim()
+        require(stage == STAGE_2) { "Stage changed $where: '$stage'" }
+        require(autoBoot.equals("true", ignoreCase = true)) { "auto-boot changed $where: '$autoBoot'" }
+        require(build == expectedBuild) { "Recovery build changed $where: expected='$expectedBuild' actual='$build'" }
+    }
+
+    private fun parseUnsignedNumber(raw: String?): ULong? {
+        val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return runCatching {
+            if (value.startsWith("0x", ignoreCase = true)) value.substring(2).toULong(16) else value.toULong()
+        }.getOrNull()
     }
 
     private fun permittedM1Recovery(usb: UsbManager): UsbDevice? = usb.deviceList.values.firstOrNull { device ->
@@ -234,8 +295,10 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         private const val REFRESH_MS = 1000L
         private const val M1_CPID = "8103"
         private const val STAGE_2 = "2"
-        private const val RESERVATION_OWNER = "stage2-firmware-batch-test"
-        private const val READY_LABEL = "Test M1 Stage-2 Firmware Batch"
+        private const val RESTORE_RAMDISK = "RestoreRamDisk"
+        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-test"
+        private const val READY_LABEL = "Test M1 Stage-2 Firmware + RamDisk Upload"
+        private const val RUNNING_LABEL = "Stage-2 firmware + ramdisk test running…"
         private val FORBIDDEN_COMPONENTS = setOf(
             "RestoreLogo",
             "RestoreRamDisk",
