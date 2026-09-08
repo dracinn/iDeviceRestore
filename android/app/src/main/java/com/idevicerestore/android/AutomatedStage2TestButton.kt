@@ -22,8 +22,9 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * From DFU, one confirmation automatically starts the proven pre-armed DFU -> Stage-2 engine,
  * waits for the exact fresh custom Stage-2 build, then immediately starts the existing cumulative
- * Stage-2 restore-entry test. This removes the manual timing race around the short-lived custom
- * Stage-2 Recovery window while keeping the proven boot and Stage-2 implementations separate.
+ * Stage-2 restore-entry test. If the exact prepared Stage-2 build is already connected, the
+ * cumulative test starts directly. This removes the manual timing race around the short-lived
+ * custom Stage-2 Recovery window while keeping the proven boot and Stage-2 implementations separate.
  */
 class AutomatedStage2TestButton @JvmOverloads constructor(
     context: Context,
@@ -72,23 +73,17 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
 
-        val stage2Delegate = rootView.findViewById<Stage2FirmwareBatchTestButton?>(R.id.stage2FirmwareBatchTestDelegateButton)
-        val directStage2 = stage2Delegate?.isEnabled == true
-        val message = if (directStage2) {
-            "This will run the current cumulative M1 restore-entry test immediately from the connected custom Stage-2 Recovery environment. It stops before restored/usbmux restore payload traffic or erase operations."
-        } else {
-            "This single confirmation will automatically run the proven M1 DFU → iBSS → Stage-1 prerequisites → iBEC/go → fresh Stage-2 chain, then immediately continue into the current cumulative Stage-2 restore-entry test. No second button press is needed. The test stops before restored/usbmux restore payload traffic or erase operations."
-        }
-
         AlertDialog.Builder(activity)
             .setTitle("Run automated current restore-entry test?")
-            .setMessage(message)
+            .setMessage(
+                "This single confirmation verifies whether the exact prepared custom Stage-2 build is already connected. If so, it starts the current cumulative restore-entry test immediately. Otherwise it automatically runs the proven M1 DFU → iBSS → Stage-1 prerequisites → iBEC/go → fresh Stage-2 chain first. The test stops before restored/usbmux restore payload traffic or erase operations."
+            )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Run current test") { _, _ -> start(directStage2) }
+            .setPositiveButton("Run current test") { _, _ -> start() }
             .show()
     }
 
-    private fun start(directStage2: Boolean) {
+    private fun start() {
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
@@ -96,13 +91,6 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
 
         worker.execute {
             try {
-                if (directStage2) {
-                    log(activity, "Automated current test: custom Stage-2 already connected; starting cumulative restore-entry delegate immediately")
-                    startStage2Delegate(activity)
-                    waitForStage2DelegateCompletion(activity)
-                    return@execute
-                }
-
                 val ibss = Image4PreparationStore.get() ?: error("Personalized iBSS unavailable")
                 val expectedStage1Build = Stage1BuildMetadata.expectedBuild(ibss.result.file)
                     ?: error("Prepared iBSS Stage-1 build unavailable")
@@ -111,17 +99,29 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
                     ?: error("Personalized iBEC unavailable")
                 val expectedStage2Build = Stage1BuildMetadata.expectedBuild(ibecFile)
                     ?: error("Prepared iBEC Stage-2 build unavailable")
+                val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
+
+                val alreadyStage2 = findExpectedStage2(usb, expectedStage2Build)
+                if (alreadyStage2 != null) {
+                    log(
+                        activity,
+                        "Automated current test: exact custom Stage-2 already connected device=${alreadyStage2.deviceName} boot-stage=2 build-version=$expectedStage2Build; starting cumulative restore-entry delegate immediately"
+                    )
+                    startStage2Delegate(activity)
+                    waitForStage2DelegateCompletion(activity)
+                    log(activity, "Automated current test: cumulative delegate returned; direct Stage-2 run complete")
+                    return@execute
+                }
 
                 log(
                     activity,
-                    "Automated current test: START DFU-to-current-boundary expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build; manual Stage-2 handoff eliminated"
+                    "Automated current test: exact custom Stage-2 not currently connected; START DFU-to-current-boundary expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build; manual Stage-2 handoff eliminated"
                 )
 
                 val prearmed = rootView.findViewById<PrearmedStage1IbecButton?>(R.id.prearmedStage1IbecButton)
                     ?: error("Pre-armed Stage-2 delegate unavailable")
                 invokePrivateStartOnUiThread(activity, prearmed, expectedStage1Build, expectedStage2Build)
 
-                val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
                 val deadline = SystemClock.elapsedRealtime() + STAGE2_WAIT_MS
                 var reservationObserved = false
                 var releasedAt: Long? = null
@@ -144,7 +144,7 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
                         val handoffMs = (SystemClock.elapsedRealtime() - releasedAt).coerceAtLeast(0L)
                         log(
                             activity,
-                            "Automated current test: fresh custom Stage-2 handoff START device=${stage2.deviceName} build-version=$expectedStage2Build latencyAfterReservationReleaseMs=$handoffMs; invoking cumulative delegate without user input"
+                            "Automated current test: fresh custom Stage-2 handoff START device=${stage2.deviceName} boot-stage=2 build-version=$expectedStage2Build latencyAfterReservationReleaseMs=$handoffMs; invoking cumulative delegate without user input"
                         )
                         startStage2Delegate(activity)
                         waitForStage2DelegateCompletion(activity)
