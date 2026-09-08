@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
+import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 plugins {
@@ -14,13 +15,30 @@ val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 val aria2Version = "1.37.0"
 val aria2ReleaseName = "aria2-$aria2Version-aarch64-linux-android-build1"
 val aria2ReleaseUrl = "https://github.com/aria2/aria2/releases/download/release-$aria2Version/$aria2ReleaseName.zip"
+val aria2ExecutableSha256 = "9397aac0de54c8c15b8166486eb80bfe27937bd6d6b6af4bb8383b155213bec1"
 val generatedAria2Lib = layout.buildDirectory.file("generated/aria2c/jniLibs/arm64-v8a/libaria2c.so")
 
+fun File.sha256(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().buffered().use { input ->
+        val buffer = ByteArray(128 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
 val prepareAria2c by tasks.registering {
+    inputs.property("aria2Version", aria2Version)
+    inputs.property("aria2ExecutableSha256", aria2ExecutableSha256)
     outputs.file(generatedAria2Lib)
     doLast {
         val output = generatedAria2Lib.get().asFile
-        if (output.isFile && output.length() > 0L) return@doLast
+        if (output.isFile && output.sha256() == aria2ExecutableSha256) return@doLast
+        output.delete()
         output.parentFile.mkdirs()
         val temp = output.resolveSibling(output.name + ".tmp")
         temp.delete()
@@ -41,8 +59,12 @@ val prepareAria2c by tasks.registering {
                 }
             }
         }
+        val actualSha256 = temp.sha256()
+        check(actualSha256 == aria2ExecutableSha256) {
+            "aria2c SHA-256 mismatch: expected $aria2ExecutableSha256, got $actualSha256"
+        }
         check(temp.renameTo(output)) { "Could not stage official aria2c executable" }
-        println("Packaged official aria2c $aria2Version from aria2/aria2")
+        println("Packaged verified official aria2c $aria2Version sha256=$actualSha256")
     }
 }
 
