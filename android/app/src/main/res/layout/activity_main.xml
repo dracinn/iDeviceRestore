@@ -283,7 +283,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="M1 Stage-2 test"
+                    android:text="M1 Recovery"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
@@ -291,32 +291,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Starts from M1 DFU, runs the proven bounded iBSS → Stage-1 prerequisites → iBEC → fresh Stage-2 handoff, verifies boot-stage=2 and the expected build, then stops before restore-OS or persistent-storage actions."
+                    android:text="Boot into Stage-2 Recovery, then use only the current cumulative restore-entry test. Older milestone test controls are no longer shown."
                     android:textSize="13sp" />
 
-                <com.idevicerestore.android.PrearmedStage1IbecButton
-                    android:id="@+id/prearmedStage1IbecButton"
+                <com.idevicerestore.android.BootStage2RecoveryButton
+                    android:id="@+id/bootStage2RecoveryButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:enabled="false"
-                    android:text="Run M1 DFU → Stage-2 Test" />
-
-                <com.idevicerestore.android.Stage2RestoreEntryPreflightButton
-                    android:id="@+id/stage2RestoreEntryPreflightButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:enabled="false"
-                    android:text="Preflight M1 Stage-2 Restore Entry (read-only)" />
-
-                <com.idevicerestore.android.Stage2RestoreLogoTestButton
-                    android:id="@+id/stage2RestoreLogoTestButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:enabled="false"
-                    android:text="Test M1 Stage-2 RestoreLogo" />
+                    android:text="Boot Stage 2 Recovery" />
 
                 <com.idevicerestore.android.Stage2FirmwareBatchTestButton
                     android:id="@+id/stage2FirmwareBatchTestButton"
@@ -324,15 +308,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:enabled="false"
-                    android:text="Test M1 Stage-2 Firmware Batch" />
-
-                <com.idevicerestore.android.Stage2RestoreSepTestButton
-                    android:id="@+id/stage2RestoreSepTestButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:enabled="false"
-                    android:text="Test M1 Stage-2 RestoreSEP" />
+                    android:text="Run Current Stage-2 Test" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -343,5 +319,6 @@
         <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
         <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
         <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <com.idevicerestore.android.PrearmedStage1IbecButton android:id="@+id/prearmedStage1IbecButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     </LinearLayout>
 </ScrollView>
