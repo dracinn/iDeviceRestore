@@ -5,6 +5,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.SystemClock
 import android.util.AttributeSet
+import android.view.View
 import androidx.appcompat.widget.AppCompatButton
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -15,10 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * for the cumulative hardware test. Run Current Stage-2 Test owns the automated DFU-to-current
  * boundary path.
  *
- * After the bounded DFU -> Stage-2 transition releases its USB reservation, this wrapper also
- * normalizes a stale persisted auto-boot=false left by an interrupted restore-entry attempt. The
- * current cumulative Stage-2 test intentionally expects auto-boot=true while replaying its proven
- * prerequisites, so leaving a stale false value would otherwise permanently gate the next run.
+ * This control is visible only inside BootDiagnosticsActivity. The normal app exposes verified
+ * functions; active development and diagnostic-only boot-chain work stays in Boot Diagnostics.
  */
 class BootStage2RecoveryButton @JvmOverloads constructor(
     context: Context,
@@ -54,7 +53,9 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        post(refresh)
+        val diagnosticsHost = AndroidUiBridge.activity(context) is BootDiagnosticsActivity
+        visibility = if (diagnosticsHost) View.VISIBLE else View.GONE
+        if (diagnosticsHost) post(refresh)
     }
 
     override fun onDetachedFromWindow() {
@@ -161,6 +162,6 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
         private const val REPAIR_WINDOW_MS = 130_000L
         private const val M1_CPID = "8103"
         private const val STAGE_2 = "2"
-        private const val LABEL = "Diagnostic: Boot Stage 2 Only"
+        private const val LABEL = "Development test: Boot verified M1 Stage 2"
     }
 }
