@@ -11,8 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * High-level adaptive downloader used by the foreground service.
  *
  * It preserves the existing FirmwareDownloader request/result/handle API, falls back to the current
- * single-stream implementation when range support is unavailable, and keeps final size/SHA checks
- * before the .part file is promoted to the finished IPSW.
+ * single-stream implementation when range support is unavailable, and keeps final size/integrity
+ * checks before the .part file is promoted to the finished IPSW.
  */
 internal class AdaptiveFirmwareDownloader(
     private val logger: (String) -> Unit = {}
@@ -84,17 +84,32 @@ internal class AdaptiveFirmwareDownloader(
         }
         if (actualSize != total) error("Firmware download incomplete: expected $total, got $actualSize")
 
-        logger("FirmwareDownloader: verifying SHA-1 over $actualSize bytes")
-        val sha1 = FirmwareIntegrity.sha1(part, cancelled)
-        request.expectedSha1?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { expected ->
-            if (sha1 != expected) {
+        val expectedSha1 = request.expectedSha1?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val sha1 = if (expectedSha1 != null) {
+            logger("FirmwareDownloader: verifying SHA-1 over $actualSize bytes")
+            val actual = FirmwareIntegrity.sha1(part, cancelled)
+            if (actual != expectedSha1) {
                 val removed = part.delete()
                 File(request.destination.absolutePath + ".part.meta").delete()
                 File(request.destination.absolutePath + ".part.meta.tmp").delete()
                 logger("FirmwareDownloader: SHA-1 mismatch; invalid adaptive partial removed=$removed")
-                error("SHA-1 mismatch: expected $expected, got $sha1")
+                error("SHA-1 mismatch: expected $expectedSha1, got $actual")
             }
-            logger("FirmwareDownloader: SHA-1 verified: $sha1")
+            logger("FirmwareDownloader: SHA-1 verified: $actual")
+            actual
+        } else {
+            logger("FirmwareDownloader: no SHA-1 metadata; validating complete IPSW ZIP archive")
+            val entries = try {
+                FirmwareIntegrity.validateIpswArchive(part, cancelled)
+            } catch (t: Throwable) {
+                val removed = part.delete()
+                File(request.destination.absolutePath + ".part.meta").delete()
+                File(request.destination.absolutePath + ".part.meta.tmp").delete()
+                logger("FirmwareDownloader: invalid IPSW archive; adaptive partial removed=$removed")
+                throw t
+            }
+            logger("FirmwareDownloader: IPSW archive verified entries=$entries")
+            ""
         }
 
         if (request.destination.exists() && !request.destination.delete()) {
