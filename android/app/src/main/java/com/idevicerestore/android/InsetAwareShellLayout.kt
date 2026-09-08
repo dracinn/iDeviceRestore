@@ -9,6 +9,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.appcompat.widget.SwitchCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
@@ -28,6 +30,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
     private val baseTop = paddingTop
     private val baseRight = paddingRight
     private val baseBottom = paddingBottom
+    private var homeModeBadge: TextView? = null
 
     private val referenceStateMirror = object : Runnable {
         override fun run() {
@@ -54,6 +57,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         ViewCompat.requestApplyInsets(this)
         post {
             normalizePrototypePresentation(this)
+            applyNightAwareReferenceSurfaces()
             referenceStateMirror.run()
         }
     }
@@ -78,6 +82,31 @@ class InsetAwareShellLayout @JvmOverloads constructor(
             identifierView?.text = "Connect a device in Recovery or DFU"
         }
 
+        homeModeBadge?.let { badge ->
+            when {
+                status.contains("RECOVERY", ignoreCase = true) -> {
+                    badge.text = "●  Recovery Mode"
+                    badge.setTextColor(ContextCompat.getColor(context, R.color.mock_success))
+                    badge.setBackgroundResource(R.drawable.mock_reference_status_pill)
+                }
+                status.contains("DFU", ignoreCase = true) -> {
+                    badge.text = "●  DFU Mode"
+                    badge.setTextColor(ContextCompat.getColor(context, R.color.mock_primary))
+                    badge.setBackgroundResource(R.drawable.mock_reference_card)
+                }
+                status.startsWith("No Apple USB", ignoreCase = true) || status.isBlank() -> {
+                    badge.text = "○  No Device"
+                    badge.setTextColor(ContextCompat.getColor(context, R.color.mock_text_secondary))
+                    badge.setBackgroundResource(R.drawable.mock_reference_card)
+                }
+                else -> {
+                    badge.text = "●  Apple Device"
+                    badge.setTextColor(ContextCompat.getColor(context, R.color.mock_primary))
+                    badge.setBackgroundResource(R.drawable.mock_reference_card)
+                }
+            }
+        }
+
         val firmwareTitle = findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
         val homeFirmware = findViewById<TextView?>(R.id.homeFirmwareSummary)
         if (firmwareTitle.startsWith("Firmware ")) {
@@ -87,12 +116,28 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         }
     }
 
+    private fun applyNightAwareReferenceSurfaces() {
+        val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
+        val selectedRow = connectedLabel?.parent?.parent as? View
+        selectedRow?.setBackgroundColor(ContextCompat.getColor(context, R.color.mock_selected_row))
+    }
+
     private fun normalizePrototypePresentation(view: View) {
         when (view) {
             is EditText -> if (view.hint?.toString() == "Search devices or builds") {
                 view.isEnabled = false
                 view.hint = "Search devices (e.g. MacBookAir10,1)"
                 view.alpha = 1f
+            }
+
+            is SwitchCompat -> when (view.text?.toString()) {
+                "Automatically detect devices",
+                "Check for app updates at launch",
+                "Use verbose logging",
+                "Organize firmware by device" -> {
+                    view.isEnabled = false
+                    view.alpha = 1f
+                }
             }
 
             is CheckBox -> when (view.text?.toString()) {
@@ -113,6 +158,10 @@ class InsetAwareShellLayout @JvmOverloads constructor(
             is ProgressBar -> if (view.id == View.NO_ID && view.max == 100 && view.progress == 25) {
                 view.progress = 0
             }
+
+            is TextView -> if (view.text?.toString() == "●  Recovery Mode" && homeModeBadge == null) {
+                homeModeBadge = view
+            }
         }
 
         if (view is ViewGroup) {
@@ -120,6 +169,16 @@ class InsetAwareShellLayout @JvmOverloads constructor(
                 normalizePrototypePresentation(view.getChildAt(index))
             }
         }
+    }
+
+    private fun findTextView(root: View, predicate: (TextView) -> Boolean): TextView? {
+        if (root is TextView && predicate(root)) return root
+        if (root is ViewGroup) {
+            for (index in 0 until root.childCount) {
+                findTextView(root.getChildAt(index), predicate)?.let { return it }
+            }
+        }
+        return null
     }
 
     companion object {
