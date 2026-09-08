@@ -11,6 +11,7 @@
 
     <application
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:label="iDeviceRestore Lab"
         android:theme="@style/Theme.IDeviceRestore">
         <service
