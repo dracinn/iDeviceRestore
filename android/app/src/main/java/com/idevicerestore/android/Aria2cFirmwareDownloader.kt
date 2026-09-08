@@ -3,10 +3,14 @@ package com.idevicerestore.android
 import android.content.Context
 import android.os.Build
 import java.io.File
+import java.security.KeyStore
+import java.util.Base64
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 /**
  * Production firmware downloader backed by the official aria2c Android executable from aria2/aria2.
@@ -46,6 +50,7 @@ internal class Aria2cFirmwareDownloader(
         request.destination.parentFile?.mkdirs()
 
         val aria2c = requireOfficialAria2c()
+        val caBundle = writeAndroidCaBundle()
         val part = File(request.destination.absolutePath + ".part")
         val aria2Control = File(part.absolutePath + ".aria2")
         val oldAdaptiveMeta = File(request.destination.absolutePath + ".part.meta")
@@ -59,14 +64,17 @@ internal class Aria2cFirmwareDownloader(
         }
 
         val resumed = part.isFile || aria2Control.isFile
+        val connectionCount = request.connections.coerceIn(1, 16)
         val command = mutableListOf(
             aria2c.absolutePath,
             "--continue=true",
             "--auto-file-renaming=false",
             "--allow-overwrite=true",
             "--file-allocation=none",
-            "--max-connection-per-server=${request.connections.coerceIn(1, 16)}",
-            "--split=${request.connections.coerceIn(1, 16)}",
+            "--check-certificate=true",
+            "--ca-certificate=${caBundle.absolutePath}",
+            "--max-connection-per-server=$connectionCount",
+            "--split=$connectionCount",
             "--min-split-size=1M",
             "--max-tries=${request.maxRetries.coerceAtLeast(1)}",
             "--retry-wait=2",
@@ -82,7 +90,7 @@ internal class Aria2cFirmwareDownloader(
             request.url
         )
 
-        logger("aria2c: starting official aria2 $ARIA2_VERSION split=${request.connections.coerceIn(1, 16)} resume=$resumed")
+        logger("aria2c: starting official aria2 $ARIA2_VERSION split=$connectionCount resume=$resumed")
         val process = ProcessBuilder(command)
             .redirectErrorStream(true)
             .start()
@@ -168,7 +176,7 @@ internal class Aria2cFirmwareDownloader(
             bytes = request.destination.length(),
             sha1 = sha1,
             resumed = resumed,
-            segmented = request.connections > 1
+            segmented = connectionCount > 1
         )
     }
 
@@ -192,6 +200,28 @@ internal class Aria2cFirmwareDownloader(
         return binary
     }
 
+    /** aria2's Android notes call out the non-Unix CA layout; export Android's live trust store. */
+    private fun writeAndroidCaBundle(): File {
+        val directory = File(appContext.cacheDir, "aria2c").apply { mkdirs() }
+        val bundle = File(directory, "android-ca-bundle.pem")
+        val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        factory.init(null as KeyStore?)
+        val manager = factory.trustManagers.filterIsInstance<X509TrustManager>().firstOrNull()
+            ?: error("Android X509 trust manager unavailable")
+        val issuers = manager.acceptedIssuers
+        require(issuers.isNotEmpty()) { "Android trust store contains no accepted issuers" }
+        bundle.bufferedWriter().use { writer ->
+            issuers.forEach { certificate ->
+                val encoded = Base64.getMimeEncoder(64, "\n".toByteArray()).encodeToString(certificate.encoded)
+                writer.appendLine("-----BEGIN CERTIFICATE-----")
+                writer.appendLine(encoded)
+                writer.appendLine("-----END CERTIFICATE-----")
+            }
+        }
+        logger("aria2c: exported ${issuers.size} Android trusted CA certificates")
+        return bundle
+    }
+
     private fun parseProgress(line: String, expectedSize: Long): FirmwareDownloader.Progress? {
         val match = PROGRESS.find(line) ?: return null
         val downloaded = parseHumanBytes(match.groupValues[1]) ?: return null
@@ -211,7 +241,7 @@ internal class Aria2cFirmwareDownloader(
         val match = HUMAN_BYTES.matchEntire(raw.trim()) ?: return null
         val value = match.groupValues[1].toDoubleOrNull() ?: return null
         val multiplier = when (match.groupValues[2]) {
-            "" -> 1.0
+            "", "B" -> 1.0
             "KiB" -> 1024.0
             "MiB" -> 1024.0 * 1024.0
             "GiB" -> 1024.0 * 1024.0 * 1024.0
