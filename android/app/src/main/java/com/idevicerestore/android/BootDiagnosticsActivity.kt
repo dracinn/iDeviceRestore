@@ -9,6 +9,8 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Typeface
+import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -16,6 +18,8 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import com.google.android.material.card.MaterialCardView
 import java.util.concurrent.Executors
 
 class BootDiagnosticsActivity : AppCompatActivity() {
@@ -31,6 +35,13 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private lateinit var logPathView: TextView
     private lateinit var activeTestLogView: TextView
     private lateinit var runButton: Button
+    private lateinit var progressSummaryView: TextView
+    private lateinit var diagnosticsProgress: ProgressBar
+    private lateinit var connectionStatusView: TextView
+    private lateinit var hardwareStatusView: TextView
+    private lateinit var bootStatusView: TextView
+    private lateinit var recoveryStatusView: TextView
+    private lateinit var logsStatusView: TextView
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionAction by lazy { "${packageName}.BOOT_DIAGNOSTICS_USB_PERMISSION" }
 
@@ -59,7 +70,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "Boot Diagnostics"
+        title = "Diagnostics"
         usbManager = getSystemService(USB_SERVICE) as UsbManager
         logger = BootDiagnosticLogger(this)
         engine = BootDiagnosticEngine(usbManager, logger)
@@ -77,7 +88,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         logger.log("Policy: Boot Diagnostics is the unrestricted development and hardware-test surface; only verified functions are promoted to the main app")
         logger.log("Individual development tests may define their own prerequisites, confirmations, and current stop boundaries while they are being proven")
-        logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
+        logPathView.text = "${logger.sessionDirectory.absolutePath}\n\ndiagnostic.log\nusb-events.log\nsummary.txt"
         runDiagnostic(requestPermission = true)
     }
 
@@ -90,100 +101,186 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private fun buildContentView(): View {
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
+        val primary = ContextCompat.getColor(this, R.color.mock_text_primary)
+        val secondary = ContextCompat.getColor(this, R.color.mock_text_secondary)
+        val blue = ContextCompat.getColor(this, R.color.mock_primary)
+        val separator = ContextCompat.getColor(this, R.color.mock_separator)
+        val surface = ContextCompat.getColor(this, R.color.mock_surface)
+        val background = ContextCompat.getColor(this, R.color.mock_background)
 
-        val scroll = ScrollView(this).apply { isFillViewport = true }
+        fun label(text: String, size: Float = 11f, bold: Boolean = false) = TextView(this).apply {
+            this.text = text
+            textSize = size
+            setTextColor(if (bold) primary else secondary)
+            if (bold) setTypeface(typeface, Typeface.BOLD)
+        }
+
+        fun card(): MaterialCardView = MaterialCardView(this).apply {
+            radius = dp(13).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = separator
+            setCardBackgroundColor(surface)
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setBackgroundColor(background)
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(28))
+            setPadding(dp(12), dp(8), dp(12), dp(20))
         }
         scroll.addView(root)
 
-        root.addView(TextView(this).apply {
-            text = "Boot Diagnostics"
-            textSize = 26f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        })
-        root.addView(TextView(this).apply {
-            text = "Unrestricted development and hardware-validation lab. New device support, protocol work, restore behavior, mutations, transport experiments, and bug fixes are developed here before verified functionality is promoted into the normal iDeviceRestore interface."
-            textSize = 14f
-            setPadding(0, dp(4), 0, dp(14))
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(42))
+        }
+        header.addView(TextView(this).apply {
+            text = "‹"
+            textSize = 29f
+            setTextColor(primary)
+            gravity = Gravity.CENTER
+            setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(dp(34), dp(40)))
+        header.addView(TextView(this).apply {
+            text = "Diagnostics"
+            textSize = 21f
+            setTextColor(primary)
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(TextView(this).apply {
+            text = "⋮"
+            textSize = 22f
+            setTextColor(primary)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(dp(28), dp(40)))
+        root.addView(header)
+        root.addView(label("Analyze why your device won't boot.", 10f).apply {
+            setPadding(dp(35), 0, 0, dp(9))
         })
 
-        root.addView(TextView(this).apply {
-            text = "CURRENT TEST SCOPE"
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, dp(4), 0, dp(4))
-        })
-        root.addView(TextView(this).apply {
-            text = "Boot Diagnostics itself has no product-level development restriction. The entries below describe only what the currently implemented tests do today. Future experimental tests may go beyond these boundaries while they are being developed here.\n\n" +
-                "• Functional matrix: currently read-only USB/Recovery observation.\n" +
-                "• M1 Stage-2 development test: currently uses the proven CPID=8103 path and stops at verified Stage 2.\n" +
-                "• Current cumulative Stage-2 test: currently reaches the proven restore-entry boundary and stops after the first fresh post-Recovery Apple USB enumeration.\n" +
-                "• Future-device and restore-development tests may add new active behavior here first, with their actual prerequisites, mutations, and observed results logged explicitly."
-            textSize = 12f
-            setPadding(0, 0, 0, dp(14))
-        })
+        val checklist = card()
+        val checklistBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        checklist.addView(checklistBody)
 
-        stateView = section(root, "Current state", "Waiting for scan", 20f)
-        deviceView = section(root, "Detected device", "No Apple USB device", 14f)
-        recoveryView = section(root, "Observed boot evidence", "No Recovery snapshot yet", 13f, monospace = true)
+        fun addRow(icon: String, title: String, subtitle: String, initial: String, active: Boolean = true): TextView {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(6), dp(8), dp(6))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(51))
+            }
+            row.addView(TextView(this).apply {
+                text = icon
+                textSize = 19f
+                gravity = Gravity.CENTER
+                setTextColor(if (active) blue else secondary)
+                setBackgroundResource(R.drawable.mock_reference_status_pill)
+            }, LinearLayout.LayoutParams(dp(34), dp(34)))
+            row.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(label(title, 11f, true))
+                addView(label(subtitle, 9f))
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { leftMargin = dp(9) })
+            val status = TextView(this).apply {
+                text = initial
+                textSize = 15f
+                gravity = Gravity.CENTER
+                setTextColor(if (active) blue else secondary)
+            }
+            row.addView(status, LinearLayout.LayoutParams(dp(34), LinearLayout.LayoutParams.MATCH_PARENT))
+            checklistBody.addView(row)
+            if (checklistBody.childCount < 8) checklistBody.addView(View(this).apply { setBackgroundColor(separator) }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)))
+            return status
+        }
+
+        connectionStatusView = addRow("▣", "Device Connection", "Checking USB and mode...", "○")
+        hardwareStatusView = addRow("▤", "Hardware Info", "Reading device information...", "○")
+        bootStatusView = addRow("◴", "Boot Analysis", "Checking for common issues...", "○")
+        addRow("▥", "Storage Health", "Available for diagnostic development", "○", active = false)
+        recoveryStatusView = addRow("◷", "Recovery Environment", "Verifying recovery and firmware...", "○")
+        addRow("▣", "NVRAM", "Available for diagnostic development", "○", active = false)
+        addRow("▤", "Startup Disk", "Available for diagnostic development", "○", active = false)
+        logsStatusView = addRow("▤", "Logs", "Collecting and analyzing logs...", "○")
+        root.addView(checklist)
+
+        val progressCard = card().apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(9) }
+        }
+        val progressBody = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+        progressCard.addView(progressBody)
+        val progressTop = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        progressTop.addView(TextView(this).apply {
+            text = "⌁"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(blue)
+            setBackgroundResource(R.drawable.mock_reference_status_pill)
+        }, LinearLayout.LayoutParams(dp(36), dp(36)))
+        val progressLabels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        progressLabels.addView(label("Running diagnostics...", 11f, true))
+        stateView = label("This may take a few moments.", 9f)
+        progressLabels.addView(stateView)
+        progressTop.addView(progressLabels, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(9) })
+        progressBody.addView(progressTop)
+
+        val progressLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        diagnosticsProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0 }
+        progressLine.addView(diagnosticsProgress, LinearLayout.LayoutParams(0, dp(6), 1f))
+        progressSummaryView = label("0 of 8 complete", 9f).apply { gravity = Gravity.END }
+        progressLine.addView(progressSummaryView, LinearLayout.LayoutParams(dp(78), dp(28)))
+        progressBody.addView(progressLine)
 
         runButton = Button(this).apply {
-            text = "Run current functional test matrix"
+            text = "Run diagnostics"
+            isAllCaps = false
             setOnClickListener { runDiagnostic(requestPermission = true) }
         }
-        root.addView(runButton)
+        progressBody.addView(runButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40)))
+        root.addView(progressCard)
 
-        testMatrixView = section(
-            root,
-            "Functional test matrix",
-            "No tests have run yet.",
-            13f,
-            monospace = true
-        )
-        findingsView = section(root, "Diagnostic findings", "No findings yet", 14f)
-        timelineView = section(root, "Boot-state timeline", "No events yet", 12f, monospace = true)
+        deviceView = detailSection(root, "Detected device", "No Apple USB device", dp(10), primary, secondary, separator, surface)
+        recoveryView = detailSection(root, "Observed boot evidence", "No Recovery snapshot yet", dp(8), primary, secondary, separator, surface, monospace = true)
 
-        root.addView(TextView(this).apply {
-            text = "Active development tests"
-            textSize = 18f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, dp(20), 0, dp(4))
-        })
-        root.addView(TextView(this).apply {
-            text = "All experimental hardware work belongs here until it is verified. Each control should state what it currently does, what prerequisites it needs, and what evidence it produced; those are test properties, not restrictions on Boot Diagnostics as a development surface."
-            textSize = 12f
-            setPadding(0, 0, 0, dp(10))
-        })
-
+        root.addView(label("Active development tests", 14f, true).apply { setPadding(0, dp(15), 0, dp(5)) })
+        root.addView(label("Boot Diagnostics is the unrestricted development surface. These are the currently implemented hardware tests; future experiments may extend beyond them.", 9f).apply { setPadding(0, 0, 0, dp(7)) })
         root.addView(BootStage2RecoveryButton(this).apply {
             id = R.id.bootStage2RecoveryButton
             text = "Development test: Boot verified M1 Stage 2"
-        })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
         root.addView(AutomatedStage2TestButton(this).apply {
             id = R.id.stage2FirmwareBatchTestButton
             text = "Development test: Run current cumulative boundary"
-        })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(5) })
 
-        val operationStatus = TextView(this).apply {
+        root.addView(TextView(this).apply {
             id = R.id.operationStatus
             text = "Active test idle"
-            textSize = 12f
-            setPadding(0, dp(8), 0, dp(4))
-        }
-        root.addView(operationStatus)
+            textSize = 10f
+            setTextColor(secondary)
+            setPadding(0, dp(6), 0, dp(3))
+        })
         root.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             id = R.id.operationProgress
             max = 100
             visibility = View.GONE
-        })
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(5)))
 
-        activeTestLogView = section(root, "Active test log", "No active hardware test output yet", 11f, monospace = true)
+        activeTestLogView = detailSection(root, "Active test log", "No active hardware test output yet", dp(8), primary, secondary, separator, surface, monospace = true)
         activeTestLogView.id = R.id.logView
+        testMatrixView = detailSection(root, "Functional test matrix", "No tests have run yet.", dp(8), primary, secondary, separator, surface, monospace = true)
+        findingsView = detailSection(root, "Diagnostic findings", "No findings yet", dp(8), primary, secondary, separator, surface)
+        timelineView = detailSection(root, "Boot-state timeline", "No events yet", dp(8), primary, secondary, separator, surface, monospace = true)
+        logPathView = detailSection(root, "Separate diagnostic logs", "Preparing session folder...", dp(8), primary, secondary, separator, surface, monospace = true)
 
-        // Hidden delegates keep the existing proven state machines intact while moving their
-        // user-facing controls into Boot Diagnostics. They are prerequisites, not extra actions.
         root.addView(PrearmedStage1IbecButton(this).apply {
             id = R.id.prearmedStage1IbecButton
             visibility = View.GONE
@@ -198,42 +295,47 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             text = FirmwarePreparationStore.get()?.buildId?.let { "Prepared firmware ($it)" } ?: "Prepared firmware unavailable"
         })
 
-        logPathView = section(root, "Separate diagnostic logs", "Preparing session folder…", 12f, monospace = true)
-
-        root.addView(TextView(this).apply {
-            text = "Status meanings: PASSED confirms an observed capability; FAILED means an expected check for the current personality did not work; BLOCKED means a prerequisite is missing; OBSERVED records useful evidence without declaring success/failure; NOT_APPLICABLE prevents device-specific knowledge from being misapplied to other hardware."
-            textSize = 12f
-            setPadding(0, dp(16), 0, dp(8))
-        })
-        root.addView(TextView(this).apply {
-            text = "Promotion rule: Boot Diagnostics may contain unverified and experimental functionality. A feature belongs in the main app only after its supported scope, repeatable hardware proof, failure behavior, logging, and intended user-facing behavior are established."
-            textSize = 12f
-        })
         return scroll
     }
 
-    private fun section(
+    private fun detailSection(
         root: LinearLayout,
         heading: String,
         initial: String,
-        size: Float,
+        topMargin: Int,
+        primary: Int,
+        secondary: Int,
+        separator: Int,
+        surface: Int,
         monospace: Boolean = false
     ): TextView {
         val density = resources.displayMetrics.density
-        val margin = (14 * density).toInt()
+        fun dp(value: Int) = (value * density).toInt()
         root.addView(TextView(this).apply {
             text = heading
-            textSize = 16f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, margin, 0, (4 * density).toInt())
+            textSize = 12f
+            setTextColor(primary)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, topMargin, 0, dp(4))
         })
-        return TextView(this).also { value ->
-            value.text = initial
-            value.textSize = size
-            value.setTextIsSelectable(true)
-            if (monospace) value.typeface = android.graphics.Typeface.MONOSPACE
-            root.addView(value)
+        val card = MaterialCardView(this).apply {
+            radius = dp(11).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = separator
+            setCardBackgroundColor(surface)
         }
+        val value = TextView(this).apply {
+            text = initial
+            textSize = if (monospace) 9f else 10f
+            setTextColor(secondary)
+            setTextIsSelectable(true)
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            if (monospace) typeface = Typeface.MONOSPACE
+        }
+        card.addView(value)
+        root.addView(card)
+        return value
     }
 
     private fun runDiagnostic(requestPermission: Boolean) {
@@ -251,7 +353,10 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
-        stateView.text = "Running functional tests…"
+        runButton.text = "Running diagnostics..."
+        stateView.text = "Running functional tests..."
+        diagnosticsProgress.progress = 18
+        progressSummaryView.text = "Starting..."
         worker.execute {
             beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
@@ -280,6 +385,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             runOnUiThread {
                 render(snapshot)
                 runButton.isEnabled = true
+                runButton.text = "Run diagnostics"
             }
         }
     }
@@ -288,10 +394,25 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         val passed = snapshot.tests.count { it.status == DiagnosticTestStatus.PASSED }
         val failed = snapshot.tests.count { it.status == DiagnosticTestStatus.FAILED }
         val blocked = snapshot.tests.count { it.status == DiagnosticTestStatus.BLOCKED }
-        stateView.text = buildString {
-            append(snapshot.state.name.replace('_', ' '))
-            if (snapshot.tests.isNotEmpty()) append("  •  $passed passed / $failed failed / $blocked blocked")
+        val terminal = snapshot.tests.count {
+            it.status == DiagnosticTestStatus.PASSED ||
+                it.status == DiagnosticTestStatus.FAILED ||
+                it.status == DiagnosticTestStatus.BLOCKED ||
+                it.status == DiagnosticTestStatus.NOT_APPLICABLE ||
+                it.status == DiagnosticTestStatus.OBSERVED
         }
+        val total = snapshot.tests.size.coerceAtLeast(1)
+        diagnosticsProgress.progress = ((terminal * 100) / total).coerceIn(0, 100)
+        progressSummaryView.text = "$passed passed"
+        stateView.text = snapshot.state.name.replace('_', ' ')
+
+        connectionStatusView.renderStatus(snapshot.tests.firstOrNull { it.id == "usb.apple.enumeration" })
+        hardwareStatusView.renderStatus(snapshot.tests.firstOrNull { it.id == "boot.identifiers" } ?: snapshot.tests.firstOrNull { it.id == "usb.interface.map" })
+        bootStatusView.renderStatus(snapshot.tests.firstOrNull { it.id == "recovery.boot-stage" } ?: snapshot.tests.firstOrNull { it.id == "usb.personality.classification" })
+        recoveryStatusView.renderStatus(snapshot.tests.firstOrNull { it.id == "recovery.command-transport" })
+        logsStatusView.text = "✓"
+        logsStatusView.setTextColor(ContextCompat.getColor(this, R.color.mock_success))
+
         deviceView.text = snapshot.deviceDescription ?: "No Apple USB device detected"
         recoveryView.text = snapshot.recovery?.let { recovery ->
             buildString {
@@ -326,18 +447,27 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         timelineView.text = snapshot.events.takeLast(40).joinToString("\n") { event ->
             "${event.timestamp}  ${event.state}  ${event.message}"
         }.ifBlank { "No events yet" }
-        logPathView.text = buildString {
-            append("Session folder\n${logger.sessionDirectory.absolutePath}\n\n")
-            append("diagnostic.log\nusb-events.log\nsummary.txt")
+        logPathView.text = "${logger.sessionDirectory.absolutePath}\n\ndiagnostic.log\nusb-events.log\nsummary.txt\n\n$passed passed / $failed failed / $blocked blocked"
+    }
+
+    private fun TextView.renderStatus(test: BootDiagnosticTestResult?) {
+        val green = ContextCompat.getColor(this@BootDiagnosticsActivity, R.color.mock_success)
+        val blue = ContextCompat.getColor(this@BootDiagnosticsActivity, R.color.mock_primary)
+        val gray = ContextCompat.getColor(this@BootDiagnosticsActivity, R.color.mock_text_tertiary)
+        when (test?.status) {
+            DiagnosticTestStatus.PASSED -> { text = "✓"; setTextColor(green) }
+            DiagnosticTestStatus.FAILED -> { text = "!"; setTextColor(android.graphics.Color.RED) }
+            DiagnosticTestStatus.BLOCKED -> { text = "○"; setTextColor(gray) }
+            DiagnosticTestStatus.OBSERVED -> { text = "◔"; setTextColor(blue) }
+            DiagnosticTestStatus.NOT_APPLICABLE -> { text = "–"; setTextColor(gray) }
+            null -> { text = "○"; setTextColor(gray) }
         }
     }
 
     @Suppress("unused")
     private fun log(message: String) {
         logger.log("ACTIVE_TEST: $message")
-        if (::activeTestLogView.isInitialized) {
-            activeTestLogView.append("\n$message")
-        }
+        if (::activeTestLogView.isInitialized) activeTestLogView.append("\n$message")
     }
 
     private fun preferredAppleDevice(): UsbDevice? {
