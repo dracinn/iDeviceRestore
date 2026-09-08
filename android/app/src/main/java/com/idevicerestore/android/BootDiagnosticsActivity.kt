@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -28,6 +29,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private lateinit var findingsView: TextView
     private lateinit var timelineView: TextView
     private lateinit var logPathView: TextView
+    private lateinit var activeTestLogView: TextView
     private lateinit var runButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionAction by lazy { "${packageName}.BOOT_DIAGNOSTICS_USB_PERMISSION" }
@@ -71,9 +73,10 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(receiver, filter)
 
-        logger.log("Boot diagnostic session started")
+        logger.log("Boot diagnostic development session started")
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        logger.log("Functional test mode: read-only USB/Recovery evidence; no boot, reboot, environment mutation, upload, revive, restore, or erase commands")
+        logger.log("Policy: new device support and bug fixes are proven here before promotion to the main app")
+        logger.log("Read-only matrix never mutates the device; active hardware tests require explicit confirmation and enforce their documented stop boundaries")
         logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
         runDiagnostic(requestPermission = true)
     }
@@ -101,9 +104,24 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Functional validation for every boot-state fact iDeviceRestore currently knows how to observe. Run these tests before adding device-specific support or treating a behavior as a bug."
+            text = "Development and hardware-validation lab. New device behavior must be reproducible here before it is promoted into the normal iDeviceRestore interface."
             textSize = 14f
             setPadding(0, dp(4), 0, dp(14))
+        })
+
+        root.addView(TextView(this).apply {
+            text = "TESTING LIMITATIONS"
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(4), 0, dp(4))
+        })
+        root.addView(TextView(this).apply {
+            text = "• Read-only functional matrix: safe observation only; no upload, setenv/saveenv, boot/go/bootx, revive, restore, erase, or restored/usbmux traffic.\n" +
+                "• Active Stage-2 boot test: currently restricted to the hardware-proven M1 CPID=8103 path and requires prepared signed firmware/TSS material. It sends boot-chain payloads but stops at verified Stage 2.\n" +
+                "• Current cumulative Stage-2 test: M1-only and explicitly mutates restore-entry environment state as already proven; it stops immediately after the first fresh post-Recovery Apple USB enumeration and before restored/usbmux, restore payloads, or erase.\n" +
+                "• Unknown/future devices are evidence, not failures. Device-specific assumptions remain OBSERVED/NOT_APPLICABLE until hardware proof exists."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(14))
         })
 
         stateView = section(root, "Current state", "Waiting for scan", 20f)
@@ -111,29 +129,83 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         recoveryView = section(root, "Observed boot evidence", "No Recovery snapshot yet", 13f, monospace = true)
 
         runButton = Button(this).apply {
-            text = "Run all functional diagnostic tests"
+            text = "Run read-only functional test matrix"
             setOnClickListener { runDiagnostic(requestPermission = true) }
         }
         root.addView(runButton)
 
         testMatrixView = section(
             root,
-            "Functional test matrix",
+            "Read-only functional test matrix",
             "No tests have run yet.",
             13f,
             monospace = true
         )
         findingsView = section(root, "Diagnostic findings", "No findings yet", 14f)
         timelineView = section(root, "Boot-state timeline", "No events yet", 12f, monospace = true)
+
+        root.addView(TextView(this).apply {
+            text = "Active hardware development tests"
+            textSize = 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(20), 0, dp(4))
+        })
+        root.addView(TextView(this).apply {
+            text = "These controls are intentionally kept in Boot Diagnostics. They are not normal app features until their behavior and device scope are hardware-proven. Buttons stay disabled until all required firmware/TSS/device prerequisites are present."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        root.addView(BootStage2RecoveryButton(this).apply {
+            id = R.id.bootStage2RecoveryButton
+            text = "Development test: Boot verified M1 Stage 2"
+        })
+        root.addView(AutomatedStage2TestButton(this).apply {
+            id = R.id.stage2FirmwareBatchTestButton
+            text = "Development test: Run current cumulative boundary"
+        })
+
+        val operationStatus = TextView(this).apply {
+            id = R.id.operationStatus
+            text = "Active test idle"
+            textSize = 12f
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        root.addView(operationStatus)
+        root.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            id = R.id.operationProgress
+            max = 100
+            visibility = View.GONE
+        })
+
+        activeTestLogView = section(root, "Active test log", "No active hardware test output yet", 11f, monospace = true)
+        activeTestLogView.id = R.id.logView
+
+        // Hidden delegates keep the existing proven state machines intact while moving their
+        // user-facing controls into Boot Diagnostics. They are prerequisites, not extra actions.
+        root.addView(PrearmedStage1IbecButton(this).apply {
+            id = R.id.prearmedStage1IbecButton
+            visibility = View.GONE
+        })
+        root.addView(Stage2FirmwareBatchTestButton(this).apply {
+            id = R.id.stage2FirmwareBatchTestDelegateButton
+            visibility = View.GONE
+        })
+        root.addView(TextView(this).apply {
+            id = R.id.firmwareTitle
+            visibility = View.GONE
+            text = FirmwarePreparationStore.get()?.buildId?.let { "Prepared firmware ($it)" } ?: "Prepared firmware unavailable"
+        })
+
         logPathView = section(root, "Separate diagnostic logs", "Preparing session folder…", 12f, monospace = true)
 
         root.addView(TextView(this).apply {
-            text = "Test statuses: PASSED confirms the observed capability, FAILED means an expected test for the current personality did not work, BLOCKED means the prerequisite is missing, OBSERVED records useful evidence without treating it as a failure, and NOT_APPLICABLE keeps device-specific knowledge visible without misclassifying other devices."
+            text = "Status meanings: PASSED confirms an observed capability; FAILED means an expected check for the current personality did not work; BLOCKED means a prerequisite is missing; OBSERVED records useful evidence without declaring success/failure; NOT_APPLICABLE prevents device-specific knowledge from being misapplied to other hardware."
             textSize = 12f
             setPadding(0, dp(16), 0, dp(8))
         })
         root.addView(TextView(this).apply {
-            text = "This diagnostic suite is intentionally non-destructive. Stage-2 boot and cumulative restore-entry validation remain separate explicit hardware tests so diagnostic observation cannot silently alter boot variables or send restore payloads."
+            text = "Promotion rule: a feature belongs in the main app only after its diagnostic test has a defined scope, repeatable hardware proof, bounded failure behavior, and logs that explain why it is safe to expose as a verified function."
             textSize = 12f
         })
         return scroll
@@ -178,7 +250,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
-        stateView.text = "Running functional tests…"
+        stateView.text = "Running read-only functional tests…"
         worker.execute {
             beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
@@ -256,6 +328,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         logPathView.text = buildString {
             append("Session folder\n${logger.sessionDirectory.absolutePath}\n\n")
             append("diagnostic.log\nusb-events.log\nsummary.txt")
+        }
+    }
+
+    @Suppress("unused")
+    private fun log(message: String) {
+        logger.log("ACTIVE_TEST: $message")
+        if (::activeTestLogView.isInitialized) {
+            activeTestLogView.append("\n$message")
         }
     }
 
