@@ -14,9 +14,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Bounded M1 Stage-2 test for manifest components loaded by iBoot after Stage-1, followed by
- * RestoreRamDisk upload/activation and RestoreDeviceTree upload/activation. SEP, KernelCache,
- * bootx, and persistent restore state changes remain deliberately excluded.
+ * Current cumulative M1 Stage-2 test. It replays the proven non-Stage1 firmware batch,
+ * RestoreRamDisk and RestoreDeviceTree boundaries, then advances through RestoreSEP/rsepfirmware
+ * when that component is present. KernelCache, bootx and persistent restore state remain excluded.
  */
 class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
     context: Context,
@@ -65,13 +65,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!isEnabled || inFlight.get()) return
         AlertDialog.Builder(activity)
-            .setTitle("Run Stage-2 ramdisk + DeviceTree activation test?")
+            .setTitle("Run current Stage-2 recovery test?")
             .setMessage(
-                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads and activates RestoreRamDisk, then mirrors upstream by uploading RestoreDeviceTree and sending 'devicetree'. " +
-                    "It stops before SEP and does not send setenv, saveenv, RestoreLogo, RestoreSEP, KernelCache, boot arguments, bootx, restore, or erase."
+                "This cumulative test requires an M1 already at boot-stage=2 and auto-boot=true. It replays the proven non-Stage1 iBoot firmware batch, RestoreRamDisk activation and RestoreDeviceTree activation, then uploads RestoreSEP and sends upstream 'rsepfirmware' when RestoreSEP is present in the selected BuildIdentity. " +
+                    "It stops before RestoreKernelCache and does not send setenv, saveenv, restore boot arguments, bootx, restore, or erase."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Run bounded DeviceTree test") { _, _ -> start() }
+            .setPositiveButton("Run current test") { _, _ -> start() }
             .show()
     }
 
@@ -82,7 +82,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         text = RUNNING_LABEL
         log(
             activity,
-            "Stage-2 firmware+ramdisk+devicetree activation test: START boundary=IsLoadedByiBoot(non-Stage1)+firmware then RestoreRamDisk upload+ramdisk then RestoreDeviceTree upload+devicetree; forbidden=setenv/saveenv/logo/SEP/kernel/bootargs/bootx/restore/erase"
+            "Current Stage-2 test: START boundary=firmware+ramdisk+devicetree+optional-RestoreSEP/rsepfirmware; forbidden=setenv/saveenv/kernel/bootargs/bootx/restore/erase"
         )
 
         worker.execute {
@@ -166,6 +166,22 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 }
                 PersonalizedImage4Validator.validate(deviceTreeFile, ticket.apImg4Ticket, RESTORE_DEVICE_TREE)
 
+                val sepPrepared = if (manifest.values.containsKey(RESTORE_SEP)) {
+                    val sep = preparedByName[RESTORE_SEP] ?: error("Prepared RestoreSEP unavailable")
+                    val sepFile = sep.personalizedFile ?: error("Personalized RestoreSEP unavailable")
+                    require(sep.image4Validated) { "RestoreSEP failed local Image4 validation" }
+                    require(sep.personalizationState == "personalized") {
+                        "RestoreSEP is not fully personalized: ${sep.personalizationState}"
+                    }
+                    require(sepFile.isFile && sepFile.length() > 0L && sep.personalizedBytes == sepFile.length()) {
+                        "RestoreSEP personalized file is missing, empty, or changed"
+                    }
+                    PersonalizedImage4Validator.validate(sepFile, ticket.apImg4Ticket, RESTORE_SEP)
+                    sep to sepFile
+                } else {
+                    null
+                }
+
                 log(activity, "Stage-2 firmware batch manifest order (${orderedNames.size})=${orderedNames.joinToString(",")}")
 
                 connection = usb.openDevice(recovery) ?: error("Could not open M1 Recovery device")
@@ -174,13 +190,13 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 val command = RecoveryTransport(connection, claimed.bulkIn)
 
                 val stageBefore = command.getenv("boot-stage").value.trim()
-                require(stageBefore == STAGE_2) { "Expected boot-stage=2 before firmware batch, got '$stageBefore'" }
+                require(stageBefore == STAGE_2) { "Expected boot-stage=2 before current test, got '$stageBefore'" }
                 val buildBefore = command.getenv("build-version").value.trim()
                 val autoBootBefore = command.getenv("auto-boot").value.trim()
                 require(autoBootBefore.equals("true", ignoreCase = true)) {
-                    "Safety gate requires auto-boot=true before firmware batch, got '$autoBootBefore'"
+                    "Safety gate requires auto-boot=true before current test, got '$autoBootBefore'"
                 }
-                log(activity, "Stage-2 firmware batch preflight: boot-stage=2 build-version=$buildBefore auto-boot=$autoBootBefore count=${orderedPrepared.size}")
+                log(activity, "Current Stage-2 preflight: boot-stage=2 build-version=$buildBefore auto-boot=$autoBootBefore firmwareCount=${orderedPrepared.size} restoreSep=${sepPrepared != null}")
 
                 orderedPrepared.forEachIndexed { index, (name, component) ->
                     val file = component.personalizedFile ?: error("Personalized component disappeared: $name")
@@ -275,16 +291,44 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                 log(activity, "Stage-2 RestoreDeviceTree activation observation: boot-stage=$deviceTreeStage build-version=$deviceTreeBuild auto-boot=$deviceTreeAutoBoot")
                 requireObservedStable(deviceTreeStage, deviceTreeBuild, deviceTreeAutoBoot, buildBefore, "DeviceTree activation")
 
+                var sepBytes = 0L
+                if (sepPrepared != null) {
+                    val (_, sepFile) = sepPrepared
+                    verifyStableStage2(command, buildBefore, "before RestoreSEP upload")
+                    log(activity, "Stage-2 RestoreSEP preflight: boot-stage=2 build-version=$buildBefore auto-boot=true bytes=${sepFile.length()} command=rsepfirmware")
+                    val sepUpload = FileInputStream(sepFile).use { input ->
+                        RecoveryUploadTransport(connection, bulkOut).sendStream(input, sepFile.length())
+                    }
+                    sepBytes = sepUpload.bytesSent
+                    log(
+                        activity,
+                        "Stage-2 RestoreSEP upload COMPLETE: bytes=${sepUpload.bytesSent} packets=${sepUpload.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s"
+                            .format(
+                                sepUpload.endpointAddress,
+                                sepUpload.initResult?.toString() ?: "unknown",
+                                sepUpload.initElapsedMs?.toString() ?: "unknown"
+                            )
+                    )
+                    verifyStableStage2(command, buildBefore, "after RestoreSEP upload")
+                    log(activity, "Stage-2 RestoreSEP activation command START: rsepfirmware")
+                    val sepCommandBytes = command.sendCommand("rsepfirmware")
+                    log(activity, "Stage-2 RestoreSEP activation command COMPLETE: rsepfirmware bytes=$sepCommandBytes upstreamDelayMs=0")
+                    verifyStableStage2(command, buildBefore, "after rsepfirmware")
+                    log(activity, "Stage-2 RestoreSEP activation observation: boot-stage=2 build-version=$buildBefore auto-boot=true")
+                } else {
+                    log(activity, "Stage-2 RestoreSEP: component absent from selected BuildIdentity; upstream conditional step skipped")
+                }
+
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk+devicetree activation test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} ramdiskCommand=SENT deviceTreeBytes=${deviceTreeUpload.bytesSent} devicetreeCommand=SENT"
+                    "Current Stage-2 test: PASS firmwareComponents=${orderedPrepared.size} ramdiskBytes=${ramdiskUpload.bytesSent} deviceTreeBytes=${deviceTreeUpload.bytesSent} restoreSepBytes=$sepBytes restoreSepActivated=${sepPrepared != null}"
                 )
                 log(
                     activity,
-                    "Stage-2 firmware+ramdisk+devicetree activation test: STOP boundary reached after DeviceTree activation; no persistent environment change, RestoreSEP/rsepfirmware, KernelCache, boot arguments, bootx, restore, or erase sent"
+                    "Current Stage-2 test: STOP boundary reached before RestoreKernelCache; no persistent environment change, boot arguments, bootx, restore, or erase sent"
                 )
             } catch (t: Throwable) {
-                log(activity, "Stage-2 firmware+ramdisk+devicetree activation test FAILED: ${t.javaClass.simpleName}: ${t.message}")
+                log(activity, "Current Stage-2 test FAILED: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 connection?.close()
                 lease?.let { runCatching { UsbOperationReservation.release(it) } }
@@ -365,9 +409,10 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         private const val STAGE_2 = "2"
         private const val RESTORE_RAMDISK = "RestoreRamDisk"
         private const val RESTORE_DEVICE_TREE = "RestoreDeviceTree"
-        private const val RESERVATION_OWNER = "stage2-firmware-ramdisk-devicetree-activate-test"
-        private const val READY_LABEL = "Test M1 Stage-2 Through DeviceTree Activation"
-        private const val RUNNING_LABEL = "Stage-2 DeviceTree activation running…"
+        private const val RESTORE_SEP = "RestoreSEP"
+        private const val RESERVATION_OWNER = "stage2-current-test"
+        private const val READY_LABEL = "Run Current Stage-2 Test"
+        private const val RUNNING_LABEL = "Current Stage-2 test running…"
         private val FORBIDDEN_COMPONENTS = setOf(
             "RestoreLogo",
             "RestoreRamDisk",
