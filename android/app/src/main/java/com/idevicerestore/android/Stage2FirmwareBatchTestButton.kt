@@ -113,9 +113,21 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                     val info = entry.dict("Info") ?: return@mapNotNull null
                     val stage1 = info.bool("IsLoadedByiBootStage1") == true
                     val loaded = info.bool("IsLoadedByiBoot") == true
+                    name.takeIf { loaded && !stage1 && name !in FORBIDDEN_COMPONENTS }
+                }
+                require(orderedNames.isNotEmpty()) { "BuildIdentity has no bounded non-Stage1 IsLoadedByiBoot components" }
+
+                val forbiddenLoaded = manifest.values.mapNotNull { (name, node) ->
+                    if (name !in FORBIDDEN_COMPONENTS) return@mapNotNull null
+                    val entry = node as? PlistNode.Dict ?: return@mapNotNull null
+                    val info = entry.dict("Info") ?: return@mapNotNull null
+                    val stage1 = info.bool("IsLoadedByiBootStage1") == true
+                    val loaded = info.bool("IsLoadedByiBoot") == true
                     name.takeIf { loaded && !stage1 }
                 }
-                require(orderedNames.isNotEmpty()) { "BuildIdentity has no non-Stage1 IsLoadedByiBoot components" }
+                require(forbiddenLoaded.isEmpty()) {
+                    "Safety boundary refuses manifest entries reserved for later restore phases: ${forbiddenLoaded.joinToString(",")}"
+                }
 
                 val preparedByName = prepared.components.associateBy { it.name }
                 val orderedPrepared = orderedNames.map { name ->
@@ -224,5 +236,12 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         private const val STAGE_2 = "2"
         private const val RESERVATION_OWNER = "stage2-firmware-batch-test"
         private const val READY_LABEL = "Test M1 Stage-2 Firmware Batch"
+        private val FORBIDDEN_COMPONENTS = setOf(
+            "RestoreLogo",
+            "RestoreRamDisk",
+            "RestoreDeviceTree",
+            "RestoreSEP",
+            "RestoreKernelCache"
+        )
     }
 }
