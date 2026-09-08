@@ -291,7 +291,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Boot into Stage-2 Recovery, then use only the current cumulative restore-entry test. Older milestone test controls are no longer shown."
+                    android:text="Boot Stage 2 Recovery remains available as a standalone diagnostic. Run Current Stage-2 Test now automates the full DFU-to-current-boundary chain without a manual Stage-2 handoff."
                     android:textSize="13sp" />
 
                 <com.idevicerestore.android.BootStage2RecoveryButton
@@ -302,7 +302,7 @@
                     android:enabled="false"
                     android:text="Boot Stage 2 Recovery" />
 
-                <com.idevicerestore.android.Stage2FirmwareBatchTestButton
+                <com.idevicerestore.android.AutomatedStage2TestButton
                     android:id="@+id/stage2FirmwareBatchTestButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -320,5 +320,6 @@
         <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
         <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
         <com.idevicerestore.android.PrearmedStage1IbecButton android:id="@+id/prearmedStage1IbecButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+        <com.idevicerestore.android.Stage2FirmwareBatchTestButton android:id="@+id/stage2FirmwareBatchTestDelegateButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
     </LinearLayout>
 </ScrollView>
