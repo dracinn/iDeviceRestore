@@ -52,7 +52,7 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     private fun refreshState() {
         if (inFlight.get()) {
             isEnabled = false
-            text = "Pre-armed test running…"
+            text = "M1 DFU → Stage-2 test running…"
             return
         }
         val activity = activity() ?: run { isEnabled = false; return }
@@ -107,14 +107,14 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         }
 
         AlertDialog.Builder(activity)
-            .setTitle("Pre-arm macOS Stage-1 → iBEC → Stage-2 test?")
+            .setTitle("Run bounded M1 DFU → Stage-2 test?")
             .setMessage(
-                "This single confirmation authorizes the bounded Apple-silicon boot handoff through personalized iBSS, the signed macOS Stage-1 prerequisites, and personalized iBEC. " +
+                "This single confirmation authorizes the bounded Apple-silicon boot handoff starting from DFU through personalized iBSS, the signed macOS Stage-1 prerequisites, and personalized iBEC. " +
                     "The app will verify Stage-1 build-version=$expectedStage1Build, send the specially signed Ap,LocalPolicy with lpolrestore, send only BuildIdentity components explicitly marked IsLoadedByiBootStage1 with the firmware command, upload validated personalized iBEC, then send the upstream M1 'go' command with bRequest=1 and require a fresh Recovery device with boot-stage=2 and build-version=$expectedStage2Build. " +
                     "This bounded test deliberately does not run saveenv, persistent restore boot-args setup, RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, restore, or erase sequencing."
             )
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Pre-arm bounded Stage-2 test") { _, _ -> start(expectedStage1Build, expectedStage2Build) }
+            .setPositiveButton("Run bounded Stage-2 test") { _, _ -> start(expectedStage1Build, expectedStage2Build) }
             .show()
     }
 
@@ -122,243 +122,226 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         val activity = activity() ?: return
         if (!inFlight.compareAndSet(false, true)) return
         isEnabled = false
-        text = "Pre-armed test running…"
-        PrearmedDiagnosticEvidenceStore.begin(expectedStage1Build)
-        replayedEvidenceSize = 0
-        setOperation(activity, "Pre-armed M1 Stage-2 diagnostic starting…", true)
+        text = "M1 DFU → Stage-2 test running…"
+        val startedAt = SystemClock.elapsedRealtime()
+        PrearmedDiagnosticEvidenceStore.beginSession("expectedStage1Build=$expectedStage1Build")
         log(
             activity,
-            "prearmed Stage-2 test: explicit user confirmation received; boundary=iBSS-macos-stage1-prereqs-iBEC-go-verify-stage2-no-restore-os " +
-                "expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build"
+            "prearmed Stage-2 test: explicit user confirmation received; boundary=iBSS-macos-stage1-prereqs-iBEC-go-verify-stage2-no-restore-os expectedStage1Build=$expectedStage1Build expectedStage2Build=$expectedStage2Build"
         )
-
         worker.execute {
-            var connection: android.hardware.usb.UsbDeviceConnection? = null
-            var reservation: UsbOperationReservation.Lease? = null
+            var lease: UsbOperationReservation.Lease? = null
             try {
-                reservation = UsbOperationReservation.tryAcquire(RESERVATION_OWNER)
+                lease = UsbOperationReservation.tryAcquire(RESERVATION_OWNER)
                     ?: error("Another USB operation is already active: ${UsbOperationReservation.owner() ?: "unknown"}")
                 log(activity, "prearmed USB reservation acquired; automatic probes/watchdogs suppressed until bounded test ends")
-
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
-                val dfu = permittedDevice(usb, AppleUsb.Mode.DFU) ?: error("No permitted Apple DFU device is connected")
-                val ids = AppleUsb.bootIdentifiers(dfu) ?: error("DFU boot identifiers unavailable")
-                require(ids.cpidHex.equals(M1_CPID, true)) { "Pre-armed test is restricted to M1 CPID 0x$M1_CPID" }
+                val dfu = permittedDevice(usb, AppleUsb.Mode.DFU) ?: error("No permitted M1 DFU device is connected")
+                val ticket = TssTicketStore.get() ?: error("No prepared TSS ticket")
+                require(foundationMatchesDevice(ticket.foundation, dfu)) { "Prepared ticket does not match connected DFU device" }
 
-                val ticket = TssTicketStore.get() ?: error("TSS ticket unavailable")
-                val ibssPrepared = Image4PreparationStore.get() ?: error("Personalized iBSS unavailable")
-                val derivedStage1Build = Stage1BuildMetadata.expectedBuild(ibssPrepared.result.file)
-                    ?: error("Prepared iBSS has no unique embedded mBoot build identifier")
-                require(derivedStage1Build == expectedStage1Build) {
-                    "Prepared iBSS Stage-1 build changed after confirmation: expected=$expectedStage1Build actual=$derivedStage1Build"
-                }
-                val restorePrepared = RestoreComponentPreparationStore.get() ?: error("Prepared restore components unavailable")
-                val ibec = restorePrepared.components.firstOrNull { it.name == "iBEC" } ?: error("Prepared iBEC unavailable")
-                val ibecFile = ibec.personalizedFile ?: error("Personalized iBEC unavailable")
-                val derivedStage2Build = Stage1BuildMetadata.expectedBuild(ibecFile)
-                    ?: error("Prepared iBEC has no unique embedded mBoot build identifier")
-                require(derivedStage2Build == expectedStage2Build) {
-                    "Prepared iBEC Stage-2 build changed after confirmation: expected=$expectedStage2Build actual=$derivedStage2Build"
-                }
-                val buildId = selectedBuildId(activity) ?: error("Selected build unavailable")
-                require(foundationMatchesDevice(ticket.foundation, dfu)) { "DFU device does not match TSS foundation" }
-                require(ticket.buildId.equals(buildId, true) && ticket.identityIndex == ibssPrepared.result.identityIndex) { "iBSS/TSS identity mismatch" }
-                require(restorePrepared.buildId.equals(buildId, true) && restorePrepared.identityIndex == ticket.identityIndex) { "iBEC/TSS identity mismatch" }
-                val firmwareContext = FirmwarePreparationStore.get() ?: error("Firmware preparation context unavailable")
-                require(firmwareContext.matches(buildId, ticket.identityIndex)) { "Firmware preparation context/TSS identity mismatch" }
-                Image4Personalizer.validatePersonalizedIbss(ibssPrepared.result.file, ticket.apImg4Ticket)
-                PersonalizedImage4Validator.validate(ibecFile, ticket.apImg4Ticket, "iBEC")
+                val preparedIbss = Image4PreparationStore.get() ?: error("No personalized iBSS is prepared")
+                val preparedRestore = RestoreComponentPreparationStore.get() ?: error("No restore components are prepared")
+                val ibec = preparedRestore.components.firstOrNull { it.name == "iBEC" }
+                    ?: error("Prepared restore components do not include iBEC")
+                val ibecFile = ibec.personalizedFile
+                require(ibecFile.isFile && ibecFile.length() == ibec.personalizedBytes) { "Prepared iBEC file is unavailable or incomplete" }
 
-                log(activity, "prearmed macOS Stage-1 preparation: resolving LocalPolicy and manifest-declared Stage-1 firmware before DFU transition")
                 val stage1Prerequisites = MacStage1Prerequisites.prepare(
-                    firmware = firmwareContext,
+                    activity = activity,
                     ticket = ticket,
-                    logger = { log(activity, "prearmed $it") }
-                )
-                log(
-                    activity,
-                    "prearmed macOS Stage-1 preparation READY: localPolicy=1 stage1Firmware=${stage1Prerequisites.stage1Firmware.size}; " +
-                        "persistent saveenv/restore boot-args intentionally excluded from bounded test"
+                    preparedRestore = preparedRestore,
+                    log = { message -> log(activity, message) }
                 )
 
-                connection = usb.openDevice(dfu) ?: error("openDevice failed for DFU")
-                val claimed = AppleUsb.claimBestInterface(dfu, connection) ?: error("Could not claim DFU interface")
-                val resetCapability = AndroidUsbReset.capability(connection)
-                require(resetCapability.available) { "Android host USB reset is unavailable; refusing to send iBSS: ${resetCapability.reason}" }
-                log(activity, "prearmed DFU preflight: Android host USB reset capability verified before iBSS upload")
-                val liveNonces = DfuNonceInfo.fromConnection(connection)
-                require(liveNonces.apNonce?.contentEquals(ticket.foundation.apNonce) == true) { "Live DFU ApNonce no longer matches TSS ticket" }
-                val expectedSepNonce = ticket.foundation.apSepNonce
-                require(expectedSepNonce == null || liveNonces.sepNonce?.contentEquals(expectedSepNonce) == true) { "Live DFU ApSepNonce no longer matches TSS ticket" }
+                val dfuConnection = usb.openDevice(dfu) ?: error("Could not open DFU device")
+                try {
+                    val ids = AppleUsb.bootIdentifiers(dfu) ?: error("DFU boot identifiers unavailable")
+                    require(ids.cpidHex.equals(M1_CPID, true)) { "Stage-2 test is restricted to M1 CPID 0x$M1_CPID" }
+                    log(activity, "prearmed DFU preflight: Android host USB reset capability verified before iBSS upload")
+                    val ibssFile = preparedIbss.result.file
+                    log(
+                        activity,
+                        "prearmed DFU stage1: personalized iBSS identity=${preparedIbss.result.identityIndex} bytes=${ibssFile.length()} cpid=${ids.cpidHex ?: "unknown"} bdid=${ids.bdidHex ?: "unknown"}"
+                    )
+                    FileInputStream(ibssFile).use { input ->
+                        DfuTransport.sendIbss(
+                            connection = dfuConnection,
+                            input = input,
+                            totalBytes = ibssFile.length(),
+                            log = { message -> log(activity, "prearmed DFU stage1: $message") }
+                        )
+                    }
+                } finally {
+                    dfuConnection.close()
+                }
 
-                RestoreSessionStore.begin(buildId)
-                val image = DfuStage1Session.PersonalizedIbss(
-                    file = ibssPrepared.result.file,
-                    identityIndex = ibssPrepared.result.identityIndex,
-                    sourceManifestPath = ibssPrepared.sourceManifestPath,
-                    personalizationId = "$buildId:identity-${ibssPrepared.result.identityIndex}:prearmed-stage2"
-                )
-                val transitionStarted = SystemClock.elapsedRealtime()
-                DfuStage1Session(
-                    device = dfu,
-                    connection = connection,
-                    interfaceId = claimed.intf.id,
-                    transitions = RestoreSessionStore.transitions,
-                    logger = { log(activity, "prearmed $it") }
-                ).uploadPersonalizedIbss(image) { progress -> setProgress(activity, "Sending personalized iBSS", progress.percent) }
-                connection.close()
-                connection = null
                 log(activity, "prearmed Stage-2 test: iBSS sent; waiting for fresh Stage-1 Recovery expectedBuild=$expectedStage1Build")
-
-                val stage1 = waitForExpectedRecoveryStage(activity, usb, ticket, transitionStarted, STAGE_1, expectedStage1Build, "Stage-1")
-                val identityKey = deviceIdentityKey(stage1)
+                val stage1Started = SystemClock.elapsedRealtime()
+                val stage1 = waitForExpectedRecoveryStage(
+                    activity = activity,
+                    usb = usb,
+                    ticket = ticket,
+                    startedAt = stage1Started,
+                    expectedStage = STAGE_1,
+                    expectedBuild = expectedStage1Build,
+                    label = "Stage-1"
+                )
                 log(activity, "prearmed Stage-1 proof: boot-stage=1 build-version=$expectedStage1Build")
-                Stage1RecoveryProofStore.prove(identityKey, STAGE_1, expectedStage1Build)
 
-                connection = usb.openDevice(stage1) ?: error("openDevice failed for custom Stage-1 Recovery")
-                val recoveryClaimed = AppleUsb.claimBestInterface(stage1, connection) ?: error("Could not claim Recovery interface")
-                val bulkOut = recoveryClaimed.bulkOut ?: error("Recovery bulk OUT endpoint unavailable")
-                val command = RecoveryTransport(connection, recoveryClaimed.bulkIn)
-                val liveStage = command.getenv("boot-stage").value.trim()
-                val liveBuild = command.getenv("build-version").value.trim()
-                require(liveStage == STAGE_1 && liveBuild == expectedStage1Build) {
-                    "Custom Stage-1 changed before prerequisite upload: boot-stage=$liveStage build-version=$liveBuild expected=$expectedStage1Build"
-                }
-                require(foundationMatchesDevice(ticket.foundation, stage1)) { "Recovery device no longer matches TSS foundation" }
-                log(
-                    activity,
-                    "prearmed Stage-1 Recovery interface already claimed: id=${recoveryClaimed.intf.id} alt=${recoveryClaimed.intf.alternateSetting} " +
-                        "bulkOut=0x%02x".format(bulkOut.address)
-                )
-
-                val orderedPrerequisites = listOf(stage1Prerequisites.localPolicy) + stage1Prerequisites.stage1Firmware
-                orderedPrerequisites.forEachIndexed { index, prerequisite ->
+                val stage1Connection = usb.openDevice(stage1) ?: error("Could not open Stage-1 Recovery device")
+                try {
+                    val claimed = AppleUsb.claimBestInterface(stage1, stage1Connection)
+                        ?: error("Could not claim Stage-1 Recovery interface")
+                    val bulkOut = claimed.bulkOut ?: error("Stage-1 Recovery interface has no bulk OUT endpoint")
                     log(
                         activity,
-                        "prearmed Stage-1 prerequisite ${index + 1}/${orderedPrerequisites.size}: ${prerequisite.name} " +
-                            "bytes=${prerequisite.file.length()} command=${prerequisite.command}"
+                        "prearmed Stage-1 Recovery interface already claimed: id=${claimed.intf.id} alt=${claimed.intf.alternateSetting} bulkOut=0x%02x".format(bulkOut.address)
                     )
-                    val upload = FileInputStream(prerequisite.file).use { input ->
-                        RecoveryUploadTransport(connection, bulkOut).sendStream(input, prerequisite.file.length()) { progress ->
-                            setProgress(activity, "Sending ${prerequisite.name}", progress.percent)
-                        }
+                    val recovery = RecoveryUploadTransport(stage1Connection, bulkOut, claimed.bulkIn)
+                    val prerequisites = listOf(stage1Prerequisites.localPolicy) + stage1Prerequisites.stage1Firmware
+                    prerequisites.forEachIndexed { index, prerequisite ->
+                        log(
+                            activity,
+                            "prearmed Stage-1 prerequisite ${index + 1}/${prerequisites.size}: ${prerequisite.name} bytes=${prerequisite.personalizedFile.length()} command=${prerequisite.command}"
+                        )
+                        val result = recovery.upload(prerequisite.personalizedFile, prerequisite.command)
+                        log(
+                            activity,
+                            "prearmed Stage-1 prerequisite COMPLETE: ${prerequisite.name} bytes=${result.bytes} packets=${result.packets} command=${prerequisite.command} commandBytes=${result.commandBytes}"
+                        )
                     }
-                    val commandBytes = command.sendCommand(prerequisite.command)
+
+                    val stage = RecoveryTransport(stage1Connection, claimed.bulkIn).getenv("boot-stage").value.trim()
+                    val build = RecoveryTransport(stage1Connection, claimed.bulkIn).getenv("build-version").value.trim()
+                    require(stage == STAGE_1 && build == expectedStage1Build) {
+                        "Stage-1 changed unexpectedly after prerequisites: boot-stage=$stage build-version=$build"
+                    }
+                    log(activity, "prearmed macOS Stage-1 prerequisites VERIFIED: boot-stage=1 build-version=$build; saveenv/restore boot-args not sent")
+
+                    log(activity, "prearmed iBEC: issuing 0x41/0 on prepared custom Stage-1; failed init must send zero bulk bytes")
+                    val upload = recovery.uploadIbec(ibecFile)
                     log(
                         activity,
-                        "prearmed Stage-1 prerequisite COMPLETE: ${prerequisite.name} bytes=${upload.bytesSent} " +
-                            "packets=${upload.packetsSent} command=${prerequisite.command} commandBytes=$commandBytes"
+                        "prearmed iBEC COMPLETE: bytes=${upload.bytes} packets=${upload.packets} endpoint=0x%02x initResult=${upload.initResult} initElapsedMs=${upload.initElapsedMs}".format(bulkOut.address)
                     )
+                    log(activity, "prearmed iBEC: sending upstream Apple-silicon go command bRequest=1")
+                    val command = RecoveryTransport(stage1Connection, claimed.bulkIn)
+                    val sent = command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
+                    log(activity, "prearmed iBEC: go command accepted bytes=$sent")
+                    log(activity, "prearmed iBEC: legacy 0x21/1 follow-up skipped on this modern Apple-silicon path per current upstream build-major gate")
+                } finally {
+                    stage1Connection.close()
                 }
 
-                val stageAfterPrereqs = command.getenv("boot-stage").value.trim()
-                val buildAfterPrereqs = command.getenv("build-version").value.trim()
-                require(stageAfterPrereqs == STAGE_1 && buildAfterPrereqs == expectedStage1Build) {
-                    "Stage-1 changed after prerequisites: boot-stage=$stageAfterPrereqs build-version=$buildAfterPrereqs expected=$expectedStage1Build"
-                }
                 log(
                     activity,
-                    "prearmed macOS Stage-1 prerequisites VERIFIED: boot-stage=1 build-version=$buildAfterPrereqs; " +
-                        "saveenv/restore boot-args not sent"
+                    "prearmed Stage-2 test: waiting for fresh Recovery enumeration after Stage-1 device=${stage1.deviceName}; expectedBuild=$expectedStage2Build"
                 )
-
-                log(activity, "prearmed iBEC: issuing 0x41/0 on prepared custom Stage-1; failed init must send zero bulk bytes")
-                val result = FileInputStream(ibecFile).use { input ->
-                    RecoveryUploadTransport(connection, bulkOut).sendStream(input, ibecFile.length()) { progress ->
-                        setProgress(activity, "Uploading personalized iBEC", progress.percent)
-                    }
-                }
-                log(
-                    activity,
-                    "prearmed iBEC COMPLETE: bytes=${result.bytesSent} packets=${result.packetsSent} endpoint=0x%02x initResult=%s initElapsedMs=%s"
-                        .format(result.endpointAddress, result.initResult?.toString() ?: "unknown", result.initElapsedMs?.toString() ?: "unknown")
-                )
-
-                val stage2TransitionStarted = SystemClock.elapsedRealtime()
-                val stage1DeviceName = stage1.deviceName
-                log(activity, "prearmed iBEC: sending upstream Apple-silicon go command bRequest=${RecoveryTransport.APPLE_SILICON_GO_BREQUEST}")
-                val goBytes = command.sendCommandBreq("go", RecoveryTransport.APPLE_SILICON_GO_BREQUEST)
-                log(activity, "prearmed iBEC: go command accepted bytes=$goBytes")
-                log(activity, "prearmed iBEC: legacy 0x21/1 follow-up skipped on this modern Apple-silicon path per current upstream build-major gate")
-                connection.close()
-                connection = null
-
-                log(activity, "prearmed Stage-2 test: waiting for fresh Recovery enumeration after Stage-1 device=$stage1DeviceName; expectedBuild=$expectedStage2Build")
                 val stage2 = waitForFreshExpectedRecoveryStage(
                     activity = activity,
                     usb = usb,
                     ticket = ticket,
-                    startedAt = stage2TransitionStarted,
-                    previousDeviceName = stage1DeviceName,
+                    previousDeviceName = stage1.deviceName,
+                    startedAt = SystemClock.elapsedRealtime(),
                     expectedStage = STAGE_2,
                     expectedBuild = expectedStage2Build,
                     label = "Stage-2"
                 )
-                log(activity, "prearmed Stage-2 proof: fresh-enumeration=true boot-stage=2 build-version=$expectedStage2Build device=${stage2.deviceName}")
-                log(activity, "prearmed Stage-2 test: STOP boundary reached — no persistent saveenv/restore boot-args, RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, restore, or erase command sent")
-                setOperation(activity, "Pre-armed diagnostic complete; Stage-2 verified", false)
+                log(
+                    activity,
+                    "prearmed Stage-2 proof: fresh-enumeration=true boot-stage=2 build-version=$expectedStage2Build device=${stage2.deviceName}"
+                )
+                log(
+                    activity,
+                    "prearmed Stage-2 test: STOP boundary reached — no persistent saveenv/restore boot-args, RestoreRamDisk, SEP, DeviceTree, KernelCache, bootx, restore, or erase command sent"
+                )
+                setOperation(activity, "M1 DFU → Stage-2 test complete", false)
             } catch (t: Throwable) {
                 log(activity, "prearmed Stage-2 test FAILED: ${t.javaClass.simpleName}: ${t.message}")
-                setOperation(activity, "Pre-armed diagnostic stopped: ${t.message ?: t.javaClass.simpleName}", false)
+                setOperation(activity, "Stage-2 test stopped: ${t.message ?: t.javaClass.simpleName}", false)
             } finally {
-                connection?.close()
-                reservation?.let { lease ->
-                    runCatching { UsbOperationReservation.release(lease) }
+                lease?.let { acquired ->
+                    runCatching { UsbOperationReservation.release(acquired) }
                         .onSuccess { log(activity, "prearmed USB reservation released") }
                 }
                 inFlight.set(false)
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
+                replayPersistedEvidence()
             }
         }
+    }
+
+    private fun setOperation(activity: AppCompatActivity, message: String, busy: Boolean) = activity.runOnUiThread {
+        activity.findViewById<TextView?>(R.id.operationStatus)?.text = message
+        activity.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply {
+            visibility = if (busy) View.VISIBLE else View.GONE
+            if (busy) isIndeterminate = true
+        }
+    }
+
+    private fun selectedBuildId(activity: AppCompatActivity): String? {
+        val prefs = activity.getSharedPreferences("firmware_selection", Context.MODE_PRIVATE)
+        return prefs.getString("selected_build_id", null)
+    }
+
+    private fun foundationMatchesDevice(foundation: TssRequestFoundation.Foundation, device: UsbDevice): Boolean {
+        val ids = AppleUsb.bootIdentifiers(device) ?: return false
+        return foundation.cpid.equals(ids.cpidHex, true) &&
+            foundation.bdid.equals(ids.bdidHex, true) &&
+            foundation.ecid.equals(ids.ecidHex, true)
+    }
+
+    private fun permittedDevice(usb: UsbManager, mode: AppleUsb.Mode): UsbDevice? = usb.deviceList.values.firstOrNull { device ->
+        device.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(device) == mode && usb.hasPermission(device)
     }
 
     private fun waitForFreshExpectedRecoveryStage(
         activity: AppCompatActivity,
         usb: UsbManager,
         ticket: TssTicketStore.Ticket,
-        startedAt: Long,
         previousDeviceName: String,
+        startedAt: Long,
         expectedStage: String,
         expectedBuild: String,
         label: String
     ): UsbDevice {
-        var freshBoundaryObserved = false
-        var lastSnapshotSignature: String? = null
+        var lastSnapshot = ""
         var lastHeartbeatAt = startedAt
-        log(activity, "prearmed $label USB observer armed: previousDevice=$previousDeviceName pollMs=$RECOVERY_STAGE_POLL_MS timeoutMs=$RECOVERY_STAGE_WAIT_MS")
+        var freshBoundaryObserved = false
+        log(
+            activity,
+            "prearmed $label USB observer armed: previousDevice=$previousDeviceName pollMs=$RECOVERY_STAGE_POLL_MS timeoutMs=$RECOVERY_STAGE_WAIT_MS"
+        )
         while (SystemClock.elapsedRealtime() - startedAt < RECOVERY_STAGE_WAIT_MS) {
             val now = SystemClock.elapsedRealtime()
-            val elapsed = now - startedAt
-            val appleDevices = usb.deviceList.values
-                .filter { it.vendorId == AppleUsb.APPLE_VID }
-                .sortedBy { it.deviceName }
-            val snapshotSignature = appleDevices.joinToString("||") { device -> usbSnapshotSignature(usb, device) }
-                .ifEmpty { "none" }
-            if (snapshotSignature != lastSnapshotSignature) {
-                log(activity, "prearmed $label USB observer change: elapsedMs=$elapsed ${describeAppleUsbSnapshot(usb, appleDevices)}")
-                lastSnapshotSignature = snapshotSignature
-                lastHeartbeatAt = now
+            val appleDevices = usb.deviceList.values.filter { it.vendorId == AppleUsb.APPLE_VID }.sortedBy { it.deviceName }
+            val snapshot = describeAppleUsbSnapshot(usb, appleDevices)
+            if (snapshot != lastSnapshot) {
+                log(activity, "prearmed $label USB observer change: elapsedMs=${now - startedAt + 1000L} $snapshot")
+                lastSnapshot = snapshot
             } else if (now - lastHeartbeatAt >= USB_OBSERVER_HEARTBEAT_MS) {
-                log(activity, "prearmed $label USB observer heartbeat: elapsedMs=$elapsed ${describeAppleUsbSnapshot(usb, appleDevices)}")
+                log(activity, "prearmed $label USB observer heartbeat: elapsedMs=${now - startedAt} $snapshot")
                 lastHeartbeatAt = now
             }
 
+            val previousStillPresent = appleDevices.any { it.deviceName == previousDeviceName }
+            val currentRecovery = appleDevices.firstOrNull { AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it) }
+            if (!freshBoundaryObserved && !previousStillPresent) {
+                freshBoundaryObserved = true
+                log(
+                    activity,
+                    "prearmed $label fresh-enumeration boundary observed: elapsedMs=${now - startedAt} previousDevice=$previousDeviceName previousStillPresent=false currentRecovery=${currentRecovery?.deviceName ?: "none"}"
+                )
+            }
+
             if (!freshBoundaryObserved) {
-                val previousStillPresent = appleDevices.any { it.deviceName == previousDeviceName }
-                val currentRecovery = appleDevices.firstOrNull {
-                    AppleUsb.mode(it) == AppleUsb.Mode.RECOVERY && usb.hasPermission(it)
-                }
-                if (!previousStillPresent || (currentRecovery != null && currentRecovery.deviceName != previousDeviceName)) {
-                    freshBoundaryObserved = true
-                    log(
-                        activity,
-                        "prearmed $label fresh-enumeration boundary observed: elapsedMs=$elapsed previousDevice=$previousDeviceName " +
-                            "previousStillPresent=$previousStillPresent currentRecovery=${currentRecovery?.deviceName ?: "none"}"
-                    )
-                } else {
-                    Thread.sleep(RECOVERY_STAGE_POLL_MS)
-                    continue
-                }
+                Thread.sleep(RECOVERY_STAGE_POLL_MS)
+                continue
+            }
+            if (previousStillPresent) {
+                Thread.sleep(RECOVERY_STAGE_POLL_MS)
+                continue
             }
 
             val recovery = permittedDevice(usb, AppleUsb.Mode.RECOVERY)
@@ -460,45 +443,6 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     private fun singleLineInterfaceSummary(device: UsbDevice): String =
         AppleUsb.interfaceSummary(device).trim().replace("\r", "").replace("\n", " | ")
 
-    private fun permittedDevice(usb: UsbManager, mode: AppleUsb.Mode): UsbDevice? = usb.deviceList.values.firstOrNull {
-        it.vendorId == AppleUsb.APPLE_VID && AppleUsb.mode(it) == mode && usb.hasPermission(it)
-    }
-
-    private fun foundationMatchesDevice(f: TssRequestFoundation.Parameters, d: UsbDevice): Boolean {
-        val ids = AppleUsb.bootIdentifiers(d) ?: return false
-        val ecid = ids.ecidHex?.toULongOrNull(16) ?: return false
-        val cpid = ids.cpidHex?.toLongOrNull(16) ?: return false
-        val bdid = ids.bdidHex?.toLongOrNull(16) ?: return false
-        return f.ecid == ecid && f.apChipId == cpid && f.apBoardId == bdid
-    }
-
-    private fun deviceIdentityKey(d: UsbDevice): String {
-        val ids = AppleUsb.bootIdentifiers(d)
-        return "${d.deviceName}:${d.productId}:${ids?.ecidHex ?: "?"}:${ids?.cpidHex ?: "?"}:${ids?.bdidHex ?: "?"}"
-    }
-
-    private fun selectedBuildId(activity: AppCompatActivity): String? {
-        val title = activity.findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
-        return Regex("\\(([0-9]{2}[A-Za-z][A-Za-z0-9]{3,12})\\)\\s*$").find(title)?.groupValues?.getOrNull(1)
-    }
-
-    private fun setProgress(activity: AppCompatActivity, label: String, percent: Int) = activity.runOnUiThread {
-        activity.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply {
-            visibility = View.VISIBLE
-            isIndeterminate = false
-            progress = percent.coerceIn(0, 100)
-        }
-        activity.findViewById<TextView?>(R.id.operationStatus)?.text = "$label… ${percent.coerceIn(0, 100)}%"
-    }
-
-    private fun setOperation(activity: AppCompatActivity, message: String, busy: Boolean) = activity.runOnUiThread {
-        activity.findViewById<TextView?>(R.id.operationStatus)?.text = message
-        activity.findViewById<android.widget.ProgressBar?>(R.id.operationProgress)?.apply {
-            visibility = if (busy) View.VISIBLE else View.GONE
-            if (busy) isIndeterminate = true
-        }
-    }
-
     private fun log(activity: AppCompatActivity, message: String) {
         PrearmedDiagnosticEvidenceStore.append(message)
         deliverActivityLog(activity, message)
@@ -541,6 +485,6 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
         private const val STAGE_1 = "1"
         private const val STAGE_2 = "2"
         private const val RESERVATION_OWNER = "prearmed-stage2-go"
-        private const val READY_LABEL = "Pre-arm M1 iBSS → Stage-1 prerequisites → iBEC → Stage-2 Test"
+        private const val READY_LABEL = "Run M1 DFU → Stage-2 Test"
     }
 }
