@@ -478,6 +478,8 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     }
 
     private fun selectedBuildId(activity: AppCompatActivity): String? {
+        val preparedBuild = FirmwarePreparationStore.get()?.buildId
+        if (!preparedBuild.isNullOrBlank()) return preparedBuild
         val title = activity.findViewById<TextView?>(R.id.firmwareTitle)?.text?.toString().orEmpty()
         return Regex("\\(([0-9]{2}[A-Za-z][A-Za-z0-9]{3,12})\\)\\s*$").find(title)?.groupValues?.getOrNull(1)
     }
@@ -524,23 +526,23 @@ class PrearmedStage1IbecButton @JvmOverloads constructor(
     }
 
     private fun activity(): AppCompatActivity? {
-        var c: Context? = context
-        while (c is ContextWrapper) {
-            if (c is AppCompatActivity) return c
-            c = c.baseContext
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is AppCompatActivity) return current
+            current = current.baseContext
         }
-        return c as? AppCompatActivity
+        return current as? AppCompatActivity
     }
 
     companion object {
-        private const val REFRESH_MS = 1000L
+        private const val REFRESH_MS = 500L
         private const val RECOVERY_STAGE_POLL_MS = 50L
-        private const val RECOVERY_STAGE_WAIT_MS = 120_000L
-        private const val USB_OBSERVER_HEARTBEAT_MS = 5_000L
+        private const val USB_OBSERVER_HEARTBEAT_MS = 2_000L
+        private const val RECOVERY_STAGE_WAIT_MS = 150_000L
+        private const val RESERVATION_OWNER = "prearmed-stage2"
         private const val M1_CPID = "8103"
         private const val STAGE_1 = "1"
         private const val STAGE_2 = "2"
-        private const val RESERVATION_OWNER = "prearmed-stage2-go"
-        private const val READY_LABEL = "Pre-arm M1 iBSS → Stage-1 prerequisites → iBEC → Stage-2 Test"
+        private const val READY_LABEL = "Pre-arm M1 Stage-2 diagnostic"
     }
 }

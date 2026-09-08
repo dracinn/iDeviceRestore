@@ -93,6 +93,16 @@ class BootDiagnosticLogger(context: Context) {
                 appendLine("Boot stage: ${readiness.bootStage ?: "unknown"}")
             }
             appendLine()
+            appendLine("Functional test matrix")
+            if (snapshot.tests.isEmpty()) {
+                appendLine("- No tests produced.")
+            } else {
+                snapshot.tests.forEach { test ->
+                    appendLine("- [${test.status}] ${test.id}: ${test.title}")
+                    appendLine("  ${test.detail}")
+                }
+            }
+            appendLine()
             appendLine("Findings")
             if (snapshot.findings.isEmpty()) {
                 appendLine("- No conclusive finding yet.")

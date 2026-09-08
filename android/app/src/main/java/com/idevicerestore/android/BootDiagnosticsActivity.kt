@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -24,9 +25,11 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private lateinit var stateView: TextView
     private lateinit var deviceView: TextView
     private lateinit var recoveryView: TextView
+    private lateinit var testMatrixView: TextView
     private lateinit var findingsView: TextView
     private lateinit var timelineView: TextView
     private lateinit var logPathView: TextView
+    private lateinit var activeTestLogView: TextView
     private lateinit var runButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionAction by lazy { "${packageName}.BOOT_DIAGNOSTICS_USB_PERMISSION" }
@@ -70,9 +73,10 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
         else @Suppress("DEPRECATION") registerReceiver(receiver, filter)
 
-        logger.log("Boot diagnostic session started")
+        logger.log("Boot diagnostic development session started")
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        logger.log("Read-only mode: no boot, reboot, environment mutation, upload, revive, or restore commands")
+        logger.log("Policy: Boot Diagnostics is the unrestricted development and hardware-test surface; only verified functions are promoted to the main app")
+        logger.log("Individual development tests may define their own prerequisites, confirmations, and current stop boundaries while they are being proven")
         logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
         runDiagnostic(requestPermission = true)
     }
@@ -100,29 +104,110 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Observe Apple USB boot states and run read-only Recovery/iBoot checks without starting a restore."
+            text = "Unrestricted development and hardware-validation lab. New device support, protocol work, restore behavior, mutations, transport experiments, and bug fixes are developed here before verified functionality is promoted into the normal iDeviceRestore interface."
             textSize = 14f
             setPadding(0, dp(4), 0, dp(14))
         })
 
+        root.addView(TextView(this).apply {
+            text = "CURRENT TEST SCOPE"
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(4), 0, dp(4))
+        })
+        root.addView(TextView(this).apply {
+            text = "Boot Diagnostics itself has no product-level development restriction. The entries below describe only what the currently implemented tests do today. Future experimental tests may go beyond these boundaries while they are being developed here.\n\n" +
+                "• Functional matrix: currently read-only USB/Recovery observation.\n" +
+                "• M1 Stage-2 development test: currently uses the proven CPID=8103 path and stops at verified Stage 2.\n" +
+                "• Current cumulative Stage-2 test: currently reaches the proven restore-entry boundary and stops after the first fresh post-Recovery Apple USB enumeration.\n" +
+                "• Future-device and restore-development tests may add new active behavior here first, with their actual prerequisites, mutations, and observed results logged explicitly."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(14))
+        })
+
         stateView = section(root, "Current state", "Waiting for scan", 20f)
         deviceView = section(root, "Detected device", "No Apple USB device", 14f)
-        recoveryView = section(root, "Recovery details", "No Recovery snapshot yet", 13f, monospace = true)
+        recoveryView = section(root, "Observed boot evidence", "No Recovery snapshot yet", 13f, monospace = true)
 
         runButton = Button(this).apply {
-            text = "Run diagnostic scan"
+            text = "Run current functional test matrix"
             setOnClickListener { runDiagnostic(requestPermission = true) }
         }
         root.addView(runButton)
 
-        findingsView = section(root, "Findings", "No findings yet", 14f)
-        timelineView = section(root, "Diagnostic timeline", "No events yet", 12f, monospace = true)
+        testMatrixView = section(
+            root,
+            "Functional test matrix",
+            "No tests have run yet.",
+            13f,
+            monospace = true
+        )
+        findingsView = section(root, "Diagnostic findings", "No findings yet", 14f)
+        timelineView = section(root, "Boot-state timeline", "No events yet", 12f, monospace = true)
+
+        root.addView(TextView(this).apply {
+            text = "Active development tests"
+            textSize = 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(20), 0, dp(4))
+        })
+        root.addView(TextView(this).apply {
+            text = "All experimental hardware work belongs here until it is verified. Each control should state what it currently does, what prerequisites it needs, and what evidence it produced; those are test properties, not restrictions on Boot Diagnostics as a development surface."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        root.addView(BootStage2RecoveryButton(this).apply {
+            id = R.id.bootStage2RecoveryButton
+            text = "Development test: Boot verified M1 Stage 2"
+        })
+        root.addView(AutomatedStage2TestButton(this).apply {
+            id = R.id.stage2FirmwareBatchTestButton
+            text = "Development test: Run current cumulative boundary"
+        })
+
+        val operationStatus = TextView(this).apply {
+            id = R.id.operationStatus
+            text = "Active test idle"
+            textSize = 12f
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        root.addView(operationStatus)
+        root.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            id = R.id.operationProgress
+            max = 100
+            visibility = View.GONE
+        })
+
+        activeTestLogView = section(root, "Active test log", "No active hardware test output yet", 11f, monospace = true)
+        activeTestLogView.id = R.id.logView
+
+        // Hidden delegates keep the existing proven state machines intact while moving their
+        // user-facing controls into Boot Diagnostics. They are prerequisites, not extra actions.
+        root.addView(PrearmedStage1IbecButton(this).apply {
+            id = R.id.prearmedStage1IbecButton
+            visibility = View.GONE
+        })
+        root.addView(Stage2FirmwareBatchTestButton(this).apply {
+            id = R.id.stage2FirmwareBatchTestDelegateButton
+            visibility = View.GONE
+        })
+        root.addView(TextView(this).apply {
+            id = R.id.firmwareTitle
+            visibility = View.GONE
+            text = FirmwarePreparationStore.get()?.buildId?.let { "Prepared firmware ($it)" } ?: "Prepared firmware unavailable"
+        })
+
         logPathView = section(root, "Separate diagnostic logs", "Preparing session folder…", 12f, monospace = true)
 
         root.addView(TextView(this).apply {
-            text = "This module reports only what can be supported by externally observable USB/Recovery evidence. Internal hardware faults may remain indeterminate."
+            text = "Status meanings: PASSED confirms an observed capability; FAILED means an expected check for the current personality did not work; BLOCKED means a prerequisite is missing; OBSERVED records useful evidence without declaring success/failure; NOT_APPLICABLE prevents device-specific knowledge from being misapplied to other hardware."
             textSize = 12f
-            setPadding(0, dp(16), 0, 0)
+            setPadding(0, dp(16), 0, dp(8))
+        })
+        root.addView(TextView(this).apply {
+            text = "Promotion rule: Boot Diagnostics may contain unverified and experimental functionality. A feature belongs in the main app only after its supported scope, repeatable hardware proof, failure behavior, logging, and intended user-facing behavior are established."
+            textSize = 12f
         })
         return scroll
     }
@@ -166,7 +251,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
-        stateView.text = "Scanning…"
+        stateView.text = "Running functional tests…"
         worker.execute {
             beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
@@ -181,6 +266,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
                             confidence = DiagnosticConfidence.INSUFFICIENT_EVIDENCE,
                             detail = error.message ?: error.javaClass.simpleName
                         )
+                    ),
+                    tests = listOf(
+                        BootDiagnosticTestResult(
+                            id = "diagnostic.engine",
+                            title = "Diagnostic engine execution",
+                            status = DiagnosticTestStatus.FAILED,
+                            detail = error.message ?: error.javaClass.simpleName
+                        )
                     )
                 )
             }
@@ -192,7 +285,13 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     }
 
     private fun render(snapshot: BootDiagnosticSnapshot) {
-        stateView.text = snapshot.state.name.replace('_', ' ')
+        val passed = snapshot.tests.count { it.status == DiagnosticTestStatus.PASSED }
+        val failed = snapshot.tests.count { it.status == DiagnosticTestStatus.FAILED }
+        val blocked = snapshot.tests.count { it.status == DiagnosticTestStatus.BLOCKED }
+        stateView.text = buildString {
+            append(snapshot.state.name.replace('_', ' '))
+            if (snapshot.tests.isNotEmpty()) append("  •  $passed passed / $failed failed / $blocked blocked")
+        }
         deviceView.text = snapshot.deviceDescription ?: "No Apple USB device detected"
         recoveryView.text = snapshot.recovery?.let { recovery ->
             buildString {
@@ -207,9 +306,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
                 }
                 append("consoleBytes=${recovery.console?.bytes ?: 0}")
             }
-        } ?: "No Recovery snapshot yet"
+        } ?: "No Recovery snapshot for the current personality. USB descriptors and boot identifiers are still tested where available."
+
+        testMatrixView.text = snapshot.tests.joinToString("\n\n") { test ->
+            "[${test.status}] ${test.title}\n${test.id}\n${test.detail}"
+        }.ifBlank { "No tests produced." }
+
         findingsView.text = if (snapshot.findings.isEmpty()) {
-            "No conclusive finding yet. Connect the affected Mac in its current boot state and scan again."
+            "No conclusive finding yet. Connect the affected device in its current boot state and leave this screen open while reproducing the problem."
         } else {
             snapshot.findings.joinToString("\n\n") { finding ->
                 buildString {
@@ -225,6 +329,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         logPathView.text = buildString {
             append("Session folder\n${logger.sessionDirectory.absolutePath}\n\n")
             append("diagnostic.log\nusb-events.log\nsummary.txt")
+        }
+    }
+
+    @Suppress("unused")
+    private fun log(message: String) {
+        logger.log("ACTIVE_TEST: $message")
+        if (::activeTestLogView.isInitialized) {
+            activeTestLogView.append("\n$message")
         }
     }
 

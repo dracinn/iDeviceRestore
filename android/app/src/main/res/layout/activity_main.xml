@@ -6,525 +6,487 @@
     android:background="@color/mock_background"
     android:orientation="vertical">
 
-    <ScrollView
-        android:id="@+id/mainScrollView"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:fillViewport="true"
-        android:overScrollMode="never">
+        android:layout_weight="1">
 
-        <LinearLayout
+        <!-- HOME -->
+        <ScrollView
+            android:id="@+id/screenHome"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="24dp">
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:overScrollMode="never">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <View
-                    android:layout_width="40dp"
-                    android:layout_height="40dp" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="iDeviceRestore"
-                        android:textColor="@color/mock_text_primary"
-                        android:textSize="21sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="1dp"
-                        android:text="Your Apple device. In good hands."
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="11sp" />
-                </LinearLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/settingsButton"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:contentDescription="Settings"
-                    android:minWidth="0dp"
-                    android:padding="8dp"
-                    android:text=""
-                    app:backgroundTint="@android:color/transparent"
-                    app:icon="@drawable/ic_settings"
-                    app:iconGravity="textStart"
-                    app:iconPadding="0dp"
-                    app:iconTint="@color/mock_text_primary" />
-            </LinearLayout>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/deviceSection"
-                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp">
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="28dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
+                    android:layout_height="64dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View android:layout_width="42dp" android:layout_height="42dp" />
 
                     <LinearLayout
-                        android:layout_width="match_parent"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
                         <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Connected device"
-                            android:textColor="@color/mock_text_secondary"
-                            android:textSize="12sp"
-                            android:textStyle="bold" />
-
-                        <com.idevicerestore.android.UsbConnectionBadgeTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="○  No USB"
-                            android:textColor="@color/mock_text_secondary"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <com.idevicerestore.android.BootStateStatusTextView
-                        android:id="@+id/status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:gravity="center"
-                        android:text="No Apple USB device selected"
-                        android:textColor="@color/mock_text_primary"
-                        android:textSize="19sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:gravity="center"
-                        android:text="Connect an Apple device by USB to identify model, mode, and firmware."
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="12sp" />
-
-                    <com.idevicerestore.android.DfuGuideButton
-                        android:id="@+id/dfuGuideButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="DFU guide — connect a device in Recovery" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
-                android:layout_marginBottom="8dp"
-                android:text="Quick Actions"
-                android:textColor="@color/mock_text_primary"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <com.idevicerestore.android.MockupNavigationButton
-                    android:id="@+id/quickRestoreButton"
-                    style="@style/Widget.IDeviceRestore.QuickAction"
-                    android:layout_width="0dp"
-                    android:layout_height="100dp"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:tag="restore"
-                    android:text="Restore\nReinstall macOS"
-                    android:textColor="@color/mock_text_primary"
-                    app:icon="@drawable/ic_restore"
-                    app:iconGravity="top"
-                    app:iconTint="@color/mock_restore" />
-
-                <com.idevicerestore.android.MockupNavigationButton
-                    android:id="@+id/quickUpdateButton"
-                    style="@style/Widget.IDeviceRestore.QuickAction"
-                    android:layout_width="0dp"
-                    android:layout_height="100dp"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:tag="update"
-                    android:text="Update\nInstall latest signed"
-                    android:textColor="@color/mock_text_primary"
-                    app:icon="@drawable/ic_firmware"
-                    app:iconGravity="top"
-                    app:iconTint="@color/mock_update" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="horizontal">
-
-                <com.idevicerestore.android.MockupNavigationButton
-                    android:id="@+id/quickDiagnosticsButton"
-                    style="@style/Widget.IDeviceRestore.QuickAction"
-                    android:layout_width="0dp"
-                    android:layout_height="100dp"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:tag="diagnostics"
-                    android:text="Diagnostics\nCheck for issues"
-                    android:textColor="@color/mock_text_primary"
-                    app:icon="@drawable/ic_tools"
-                    app:iconGravity="top"
-                    app:iconTint="@color/mock_diagnostics" />
-
-                <com.idevicerestore.android.MockupNavigationButton
-                    android:id="@+id/quickToolsButton"
-                    style="@style/Widget.IDeviceRestore.QuickAction"
-                    android:layout_width="0dp"
-                    android:layout_height="100dp"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:tag="tools"
-                    android:text="More Tools\nDFU, tests, logs"
-                    android:textColor="@color/mock_text_primary"
-                    app:icon="@drawable/ic_tools"
-                    app:iconGravity="top"
-                    app:iconTint="@color/mock_tools" />
-            </LinearLayout>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/operationSection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="18dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:id="@+id/operationTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Restore preparation"
-                        android:textColor="@color/mock_text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/operationStatus"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="5dp"
-                        android:text="Waiting for device and firmware"
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="13sp" />
-
-                    <ProgressBar
-                        android:id="@+id/operationProgress"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:indeterminate="true"
-                        android:max="100"
-                        android:visibility="gone" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/firmwareSection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:id="@+id/firmwareTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Firmware"
-                        android:textColor="@color/mock_text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="Browse, verify, and download Apple firmware."
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="12sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/firmwareStatus"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Waiting for device identification"
+                            android:text="iDeviceRestore"
                             android:textColor="@color/mock_text_primary"
-                            android:textSize="13sp" />
-
-                        <com.idevicerestore.android.FirmwareProgressTextView
-                            android:id="@+id/firmwareProgressText"
+                            android:textSize="22sp"
+                            android:textStyle="bold" />
+                        <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
-                            android:gravity="end"
-                            android:maxLines="1"
-                            android:text=""
+                            android:layout_marginTop="2dp"
+                            android:text="Your Apple device. In good hands."
                             android:textColor="@color/mock_text_secondary"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
                     </LinearLayout>
 
-                    <com.idevicerestore.android.PercentProgressBar
-                        android:id="@+id/firmwareProgress"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:max="1000"
-                        android:progress="0" />
-
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/selectFirmwareButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:enabled="false"
-                        android:text="Select signed firmware" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/downloadFirmwareButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:enabled="false"
-                        android:text="Download firmware" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/cancelDownloadButton"
+                        android:id="@+id/settingsButton"
                         style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:enabled="false"
-                        android:text="Cancel download" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/diagnosticsSection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Diagnostics"
-                        android:textColor="@color/mock_text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="Analyze connection state, boot behavior, firmware readiness, and logs."
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="12sp" />
-
-                    <com.idevicerestore.android.MockupNavigationButton
-                        android:id="@+id/openDiagnosticsButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:tag="diagnostics"
-                        android:text="Open Boot Diagnostics" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/shareLogsButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Share diagnostic report" />
-
-                    <com.idevicerestore.android.LogIconButton
-                        android:id="@+id/logsButton"
-                        style="@style/Widget.MaterialComponents.Button.TextButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:contentDescription="Logs"
-                        android:text="View logs"
-                        app:icon="@drawable/ic_logs"
+                        android:layout_width="42dp"
+                        android:layout_height="42dp"
+                        android:contentDescription="Settings"
+                        android:minWidth="0dp"
+                        android:padding="9dp"
+                        android:text=""
+                        app:backgroundTint="@android:color/transparent"
+                        app:icon="@drawable/ic_settings"
+                        app:iconGravity="textStart"
+                        app:iconPadding="0dp"
                         app:iconTint="@color/mock_text_primary" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/toolsSection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp">
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/deviceSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="18dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Connected Mac"
+                                android:textColor="@color/mock_text_secondary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+                            <com.idevicerestore.android.UsbConnectionBadgeTextView
+                                style="@style/TextAppearance.IDeviceRestore.Caption"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="○ No USB" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp"
+                            android:gravity="center"
+                            android:text="▰"
+                            android:textColor="@color/mock_text_secondary"
+                            android:textSize="54sp" />
+
+                        <com.idevicerestore.android.BootStateStatusTextView
+                            android:id="@+id/status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:gravity="center"
+                            android:text="No Apple USB device selected"
+                            android:textColor="@color/mock_text_primary"
+                            android:textSize="19sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.button.MaterialButton
+                            style="@style/Widget.IDeviceRestore.Pill"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_horizontal"
+                            android:layout_marginTop="8dp"
+                            android:clickable="false"
+                            android:text="Recovery / DFU status" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:orientation="horizontal">
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="MODEL\nAuto-detected"
+                                android:textColor="@color/mock_text_secondary"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="MODE\nUSB restore"
+                                android:textColor="@color/mock_text_secondary"
+                                android:textSize="11sp" />
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="FIRMWARE\nLatest signed"
+                                android:textColor="@color/mock_text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.idevicerestore.android.DfuGuideButton
+                            android:id="@+id/dfuGuideButton"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp"
+                            android:text="DFU guide" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/TextAppearance.IDeviceRestore.SectionTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="10dp"
+                    android:text="Quick Actions" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="M1 Recovery Tools"
+                    android:orientation="horizontal">
+                    <com.idevicerestore.android.MockupNavigationButton
+                        android:id="@+id/quickRestoreButton"
+                        style="@style/Widget.IDeviceRestore.QuickAction"
+                        android:layout_width="0dp"
+                        android:layout_height="108dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:tag="restore"
+                        android:text="Restore\nReinstall macOS"
                         android:textColor="@color/mock_text_primary"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="The current cumulative test automates DFU through the proven restore-entry boundary."
-                        android:textColor="@color/mock_text_secondary"
-                        android:textSize="12sp" />
-
-                    <com.idevicerestore.android.BootStage2RecoveryButton
-                        android:id="@+id/bootStage2RecoveryButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:enabled="false"
-                        android:text="Diagnostic: Boot Stage 2 Only" />
-
-                    <com.idevicerestore.android.AutomatedStage2TestButton
-                        android:id="@+id/stage2FirmwareBatchTestButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:enabled="false"
-                        android:text="Run Current Stage-2 Test" />
+                        app:icon="@drawable/ic_restore"
+                        app:iconGravity="top"
+                        app:iconTint="@color/mock_restore" />
+                    <com.idevicerestore.android.MockupNavigationButton
+                        android:id="@+id/quickUpdateButton"
+                        style="@style/Widget.IDeviceRestore.QuickAction"
+                        android:layout_width="0dp"
+                        android:layout_height="108dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:tag="update"
+                        android:text="Update\nInstall latest signed"
+                        android:textColor="@color/mock_text_primary"
+                        app:icon="@drawable/ic_firmware"
+                        app:iconGravity="top"
+                        app:iconTint="@color/mock_update" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
 
-            <TextView android:id="@+id/logView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <TextView android:id="@+id/probeLogView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <Button android:id="@+id/scanButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <Button android:id="@+id/probeButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <com.idevicerestore.android.PrearmedStage1IbecButton android:id="@+id/prearmedStage1IbecButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-            <com.idevicerestore.android.Stage2FirmwareBatchTestButton android:id="@+id/stage2FirmwareBatchTestDelegateButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
-        </LinearLayout>
-    </ScrollView>
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+                    <com.idevicerestore.android.MockupNavigationButton
+                        android:id="@+id/quickDiagnosticsButton"
+                        style="@style/Widget.IDeviceRestore.QuickAction"
+                        android:layout_width="0dp"
+                        android:layout_height="108dp"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:tag="diagnostics"
+                        android:text="Diagnostics\nCheck for issues"
+                        android:textColor="@color/mock_text_primary"
+                        app:icon="@drawable/ic_tools"
+                        app:iconGravity="top"
+                        app:iconTint="@color/mock_diagnostics" />
+                    <com.idevicerestore.android.MockupNavigationButton
+                        android:id="@+id/quickToolsButton"
+                        style="@style/Widget.IDeviceRestore.QuickAction"
+                        android:layout_width="0dp"
+                        android:layout_height="108dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:tag="tools"
+                        android:text="More Tools\nDFU, tests, logs"
+                        android:textColor="@color/mock_text_primary"
+                        app:icon="@drawable/ic_tools"
+                        app:iconGravity="top"
+                        app:iconTint="@color/mock_tools" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/mock_separator" />
+        <!-- FIRMWARE -->
+        <ScrollView
+            android:id="@+id/screenFirmware"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+                <TextView
+                    style="@style/TextAppearance.IDeviceRestore.ScreenTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Firmware" />
+                <TextView
+                    style="@style/TextAppearance.IDeviceRestore.Caption"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:text="Browse Apple restore images and signed builds." />
+
+                <EditText
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="18dp"
+                    android:backgroundTint="@color/mock_separator"
+                    android:hint="Search devices or builds"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:singleLine="true"
+                    android:textColor="@color/mock_text_primary"
+                    android:textColorHint="@color/mock_text_secondary" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+                    <com.google.android.material.button.MaterialButton style="@style/Widget.IDeviceRestore.Segment" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Mac" app:backgroundTint="@color/mock_primary" android:textColor="@android:color/white" />
+                    <com.google.android.material.button.MaterialButton style="@style/Widget.IDeviceRestore.Segment" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:layout_weight="1" android:text="iPhone" />
+                    <com.google.android.material.button.MaterialButton style="@style/Widget.IDeviceRestore.Segment" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:layout_weight="1" android:text="iPad" />
+                    <com.google.android.material.button.MaterialButton style="@style/Widget.IDeviceRestore.Segment" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:layout_weight="1" android:text="Watch" />
+                </LinearLayout>
+
+                <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:text="Selected device" />
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Mac" android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                        <TextView android:id="@+id/firmwareTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Waiting for connected device" android:textColor="@color/mock_text_primary" android:textSize="17sp" android:textStyle="bold" />
+                        <TextView android:id="@+id/firmwareStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Waiting for device identification" android:textColor="@color/mock_text_secondary" android:textSize="13sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:text="Available Firmware" />
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/firmwareSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Latest signed restore image" android:textColor="@color/mock_text_primary" android:textSize="15sp" android:textStyle="bold" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Apple CDN • verified before use" android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                            </LinearLayout>
+                            <com.google.android.material.button.MaterialButton style="@style/Widget.IDeviceRestore.Pill" android:layout_width="wrap_content" android:layout_height="wrap_content" android:clickable="false" android:text="Signed" android:textColor="@color/mock_success" />
+                        </LinearLayout>
+                        <com.idevicerestore.android.PercentProgressBar android:id="@+id/firmwareProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:max="1000" android:progress="0" />
+                        <com.idevicerestore.android.FirmwareProgressTextView android:id="@+id/firmwareProgressText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="end" android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/selectFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:enabled="false" android:text="Choose signed firmware" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/downloadFirmwareButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Download" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/cancelDownloadButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:enabled="false" android:text="Cancel download" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- RESTORE -->
+        <ScrollView
+            android:id="@+id/screenRestore"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                    <com.idevicerestore.android.MockupNavigationButton style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="48dp" android:layout_height="48dp" android:minWidth="0dp" android:tag="home" android:text="‹" android:textSize="28sp" />
+                    <TextView style="@style/TextAppearance.IDeviceRestore.ScreenTitle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Restore" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:orientation="horizontal">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="●\nSelect" android:textColor="@color/mock_primary" android:textSize="11sp" />
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="○\nPrepare" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="○\nRestore" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:text="○\nComplete" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="Selected Device" />
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Connected Apple device" android:textColor="@color/mock_text_primary" android:textSize="16sp" android:textStyle="bold" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Device and restore mode are verified again before any operation." android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Firmware" />
+                <com.idevicerestore.android.MockupNavigationButton style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:tag="firmware" android:text="Select signed firmware  ›" />
+
+                <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Options" />
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
+                        <CheckBox android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Erase device during restore" />
+                        <CheckBox android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Download firmware if absent" />
+                        <CheckBox android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Prepare DFU / Recovery automatically when supported" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:id="@+id/operationSection" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:id="@+id/operationTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Restore preparation" android:textColor="@color/mock_text_primary" android:textSize="16sp" android:textStyle="bold" />
+                        <TextView android:id="@+id/operationStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Waiting for device and firmware" android:textColor="@color/mock_text_secondary" android:textSize="13sp" />
+                        <ProgressBar android:id="@+id/operationProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:indeterminate="true" android:max="100" android:visibility="gone" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.idevicerestore.android.MockupNavigationButton android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp" android:tag="tools" android:text="Continue to restore tools" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- DIAGNOSTICS -->
+        <ScrollView
+            android:id="@+id/screenDiagnostics"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                    <com.idevicerestore.android.MockupNavigationButton style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="48dp" android:layout_height="48dp" android:minWidth="0dp" android:tag="home" android:text="‹" android:textSize="28sp" />
+                    <TextView style="@style/TextAppearance.IDeviceRestore.ScreenTitle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Diagnostics" />
+                </LinearLayout>
+                <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Check the connection and boot environment before restore work." />
+
+                <com.google.android.material.card.MaterialCardView android:id="@+id/diagnosticsSection" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="✓   Device Connection" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="✓   Hardware Info" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   Boot Analysis" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   Storage Health" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   Recovery Environment" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   NVRAM" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   Startup Disk" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="○   Logs" android:textColor="@color/mock_text_primary" android:textSize="15sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Diagnostic progress" android:textColor="@color/mock_text_primary" android:textSize="14sp" android:textStyle="bold" />
+                        <ProgressBar style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:max="100" android:progress="25" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Detailed boot diagnostics run in their own log window." android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.idevicerestore.android.MockupNavigationButton android:id="@+id/openDiagnosticsButton" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:tag="boot_diagnostics" android:text="Run Boot Diagnostics" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/shareLogsButton" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Share diagnostic report" />
+                <com.idevicerestore.android.LogIconButton android:id="@+id/logsButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:contentDescription="Logs" android:text="View logs" app:icon="@drawable/ic_logs" app:iconTint="@color/mock_text_primary" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- DEVICES -->
+        <ScrollView android:id="@+id/screenDevices" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+                <TextView style="@style/TextAppearance.IDeviceRestore.ScreenTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Devices" />
+                <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Connected Apple USB devices and restore personalities." />
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Current USB target" android:textColor="@color/mock_text_secondary" android:textSize="12sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Apple device connection" android:textColor="@color/mock_text_primary" android:textSize="18sp" android:textStyle="bold" />
+                        <com.idevicerestore.android.UsbConnectionBadgeTextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="9dp" android:text="○ No USB" android:textColor="@color/mock_text_secondary" android:textSize="12sp" android:textStyle="bold" />
+                        <com.idevicerestore.android.MockupNavigationButton style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:tag="home" android:text="View device on Home" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- TOOLS -->
+        <ScrollView android:id="@+id/screenTools" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp">
+                <TextView style="@style/TextAppearance.IDeviceRestore.ScreenTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Tools" />
+                <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="DFU, Recovery, cumulative hardware tests, and support tools." />
+                <com.google.android.material.card.MaterialCardView android:id="@+id/toolsSection" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+                        <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="M1 Recovery" />
+                        <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="The cumulative test remains the single normal hardware-test entry and stops at the current proven restore-entry boundary." />
+                        <com.idevicerestore.android.BootStage2RecoveryButton android:id="@+id/bootStage2RecoveryButton" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:enabled="false" android:text="Diagnostic: Boot Stage 2 Only" />
+                        <com.idevicerestore.android.AutomatedStage2TestButton android:id="@+id/stage2FirmwareBatchTestButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:enabled="false" android:text="Run Current Stage-2 Test" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+                <com.idevicerestore.android.MockupNavigationButton style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:tag="diagnostics" android:text="Diagnostics" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="70dp"
         android:background="@color/mock_surface"
         android:gravity="center"
         android:orientation="horizontal"
         android:paddingStart="8dp"
         android:paddingEnd="8dp">
-
-        <com.idevicerestore.android.MockupNavigationButton
-            android:id="@+id/navHomeButton"
-            style="@style/Widget.IDeviceRestore.BottomNavButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:tag="home"
-            android:text="Home"
-            android:textColor="@color/mock_primary"
-            app:icon="@drawable/ic_home"
-            app:iconTint="@color/mock_primary" />
-
-        <com.idevicerestore.android.MockupNavigationButton
-            android:id="@+id/navFirmwareButton"
-            style="@style/Widget.IDeviceRestore.BottomNavButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:tag="firmware"
-            android:text="Firmware"
-            app:icon="@drawable/ic_firmware" />
-
-        <com.idevicerestore.android.MockupNavigationButton
-            android:id="@+id/navDevicesButton"
-            style="@style/Widget.IDeviceRestore.BottomNavButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:tag="devices"
-            android:text="Devices"
-            app:icon="@drawable/ic_device" />
-
-        <com.idevicerestore.android.MockupNavigationButton
-            android:id="@+id/navToolsButton"
-            style="@style/Widget.IDeviceRestore.BottomNavButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:tag="tools"
-            android:text="Tools"
-            app:icon="@drawable/ic_tools" />
+        <com.idevicerestore.android.MockupNavigationButton android:id="@+id/navHomeButton" style="@style/Widget.IDeviceRestore.BottomNavButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:tag="home" android:text="Home" android:textColor="@color/mock_primary" app:icon="@drawable/ic_home" app:iconTint="@color/mock_primary" />
+        <com.idevicerestore.android.MockupNavigationButton android:id="@+id/navFirmwareButton" style="@style/Widget.IDeviceRestore.BottomNavButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:tag="firmware" android:text="Firmware" app:icon="@drawable/ic_firmware" />
+        <com.idevicerestore.android.MockupNavigationButton android:id="@+id/navDevicesButton" style="@style/Widget.IDeviceRestore.BottomNavButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:tag="devices" android:text="Devices" app:icon="@drawable/ic_device" />
+        <com.idevicerestore.android.MockupNavigationButton android:id="@+id/navToolsButton" style="@style/Widget.IDeviceRestore.BottomNavButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:tag="tools" android:text="Tools" app:icon="@drawable/ic_tools" />
     </LinearLayout>
+
+    <!-- Existing invisible delegates retained unchanged for protocol/session behavior. -->
+    <TextView android:id="@+id/logView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <TextView android:id="@+id/probeLogView" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <Button android:id="@+id/scanButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <Button android:id="@+id/probeButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.TssTicketButton android:id="@+id/requestTssTicketButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.Image4PrepareButton android:id="@+id/prepareIbssButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.RestoreComponentPrepareButton android:id="@+id/prepareRestoreComponentsButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.PrearmedStage1IbecButton android:id="@+id/prearmedStage1IbecButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
+    <com.idevicerestore.android.Stage2FirmwareBatchTestButton android:id="@+id/stage2FirmwareBatchTestDelegateButton" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone" />
 </com.idevicerestore.android.InsetAwareShellLayout>

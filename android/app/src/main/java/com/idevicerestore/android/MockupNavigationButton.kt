@@ -2,16 +2,17 @@ package com.idevicerestore.android
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.util.AttributeSet
 import android.view.View
-import android.widget.ScrollView
+import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
 /**
- * Lightweight navigation used by the mockup-inspired home shell.
+ * Presentation-only routing for the mockup-driven shell.
  *
- * Keeping this behavior in the View avoids adding more presentation-only routing to MainActivity.
- * The button action is selected by android:tag in XML.
+ * The normal app exposes verified functions only. Unverified restore work is not reachable here;
+ * active development and device-specific testing opens BootDiagnosticsActivity instead.
  */
 class MockupNavigationButton @JvmOverloads constructor(
     context: Context,
@@ -20,30 +21,60 @@ class MockupNavigationButton @JvmOverloads constructor(
 ) : MaterialButton(context, attrs, defStyleAttr) {
 
     init {
-        setOnClickListener { route() }
+        setOnClickListener { route(tag?.toString()) }
     }
 
-    private fun route() {
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
         when (tag?.toString()) {
-            ACTION_HOME -> scrollToTop()
-            ACTION_DEVICES -> scrollTo(R.id.deviceSection)
-            ACTION_FIRMWARE, ACTION_UPDATE -> scrollTo(R.id.firmwareSection)
-            ACTION_TOOLS -> scrollTo(R.id.toolsSection)
-            ACTION_RESTORE -> scrollTo(R.id.operationSection)
-            ACTION_DIAGNOSTICS -> AndroidUiBridge.activity(context)?.startActivity(
-                Intent(context, BootDiagnosticsActivity::class.java)
-            )
+            ACTION_RESTORE -> visibility = View.GONE
+            ACTION_UPDATE -> text = "Firmware\nSigned downloads"
+            ACTION_DIAGNOSTICS -> text = when (id) {
+                R.id.quickDiagnosticsButton -> "Boot Diagnostics\nDevelopment & testing"
+                else -> text
+            }
         }
     }
 
-    private fun scrollToTop() {
-        rootView.findViewById<ScrollView?>(R.id.mainScrollView)?.smoothScrollTo(0, 0)
+    private fun route(action: String?) {
+        when (action) {
+            ACTION_HOME -> showScreen(R.id.screenHome, ACTION_HOME)
+            ACTION_FIRMWARE, ACTION_UPDATE -> showScreen(R.id.screenFirmware, ACTION_FIRMWARE)
+            ACTION_DEVICES -> showScreen(R.id.screenDevices, ACTION_DEVICES)
+            ACTION_TOOLS -> showScreen(R.id.screenTools, ACTION_TOOLS)
+            ACTION_DIAGNOSTICS, ACTION_BOOT_DIAGNOSTICS -> openBootDiagnostics()
+            ACTION_RESTORE -> Unit
+        }
     }
 
-    private fun scrollTo(targetId: Int) {
-        val scroll = rootView.findViewById<ScrollView?>(R.id.mainScrollView) ?: return
-        val target = rootView.findViewById<View?>(targetId) ?: return
-        scroll.post { scroll.smoothScrollTo(0, target.top.coerceAtLeast(0)) }
+    private fun openBootDiagnostics() {
+        AndroidUiBridge.activity(context)?.startActivity(
+            Intent(context, BootDiagnosticsActivity::class.java)
+        )
+    }
+
+    private fun showScreen(targetId: Int, selectedNavAction: String?) {
+        val root = rootView
+        SCREEN_IDS.forEach { id ->
+            root.findViewById<View?>(id)?.visibility = if (id == targetId) View.VISIBLE else View.GONE
+        }
+        root.findViewById<View?>(targetId)?.let { target ->
+            target.post { target.scrollTo(0, 0) }
+        }
+        updateBottomNavigation(selectedNavAction)
+    }
+
+    private fun updateBottomNavigation(selectedAction: String?) {
+        val primary = ContextCompat.getColor(context, R.color.mock_primary)
+        val secondary = ContextCompat.getColor(context, R.color.mock_text_secondary)
+        NAV_BUTTON_IDS.forEach { id ->
+            val button = rootView.findViewById<MaterialButton?>(id) ?: return@forEach
+            val selected = button.tag?.toString() == selectedAction
+            val tint = ColorStateList.valueOf(if (selected) primary else secondary)
+            button.setTextColor(tint)
+            button.iconTint = tint
+            button.isSelected = selected
+        }
     }
 
     companion object {
@@ -54,5 +85,19 @@ class MockupNavigationButton @JvmOverloads constructor(
         private const val ACTION_TOOLS = "tools"
         private const val ACTION_RESTORE = "restore"
         private const val ACTION_DIAGNOSTICS = "diagnostics"
+        private const val ACTION_BOOT_DIAGNOSTICS = "boot_diagnostics"
+
+        private val SCREEN_IDS = intArrayOf(
+            R.id.screenHome,
+            R.id.screenFirmware,
+            R.id.screenDevices,
+            R.id.screenTools
+        )
+        private val NAV_BUTTON_IDS = intArrayOf(
+            R.id.navHomeButton,
+            R.id.navFirmwareButton,
+            R.id.navDevicesButton,
+            R.id.navToolsButton
+        )
     }
 }
