@@ -1,5 +1,6 @@
 package com.idevicerestore.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import com.idevicerestore.android.databinding.ActivitySettingsBinding
@@ -16,6 +17,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.includeBetaFirmwareSwitch.isChecked = appSettings.includeBetaFirmware
         binding.includeBetaFirmwareSwitch.setOnCheckedChangeListener { _, checked ->
             appSettings.includeBetaFirmware = checked
+        }
+        binding.openBootDiagnosticsButton.setOnClickListener {
+            startActivity(Intent(this, BootDiagnosticsActivity::class.java))
         }
         binding.doneButton.setOnClickListener { finish() }
     }
