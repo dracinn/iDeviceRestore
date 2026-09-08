@@ -21,10 +21,11 @@ import java.util.concurrent.atomic.AtomicReference
  * User-facing current restore-entry test orchestrator.
  *
  * From DFU, one confirmation automatically starts the proven pre-armed DFU -> Stage-2 engine,
- * waits for the exact fresh custom Stage-2 build, then immediately starts the existing cumulative
- * Stage-2 restore-entry test. If the exact prepared Stage-2 build is already connected, the
- * cumulative test starts directly. This removes the manual timing race around the short-lived
- * custom Stage-2 Recovery window while keeping the proven boot and Stage-2 implementations separate.
+ * waits for the exact fresh custom Stage-2 build, normalizes the cumulative-test auto-boot
+ * prerequisite, then immediately starts the existing cumulative Stage-2 restore-entry test. If the
+ * exact prepared Stage-2 build is already connected, the same normalization and cumulative test run
+ * directly. This removes the manual timing race and stale auto-boot dependency while keeping the
+ * proven boot and Stage-2 implementations separate.
  */
 class AutomatedStage2TestButton @JvmOverloads constructor(
     context: Context,
@@ -76,7 +77,7 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
         AlertDialog.Builder(activity)
             .setTitle("Run automated current restore-entry test?")
             .setMessage(
-                "This single confirmation verifies whether the exact prepared custom Stage-2 build is already connected. If so, it starts the current cumulative restore-entry test immediately. Otherwise it automatically runs the proven M1 DFU → iBSS → Stage-1 prerequisites → iBEC/go → fresh Stage-2 chain first. The test stops before restored/usbmux restore payload traffic or erase operations."
+                "This single confirmation verifies whether the exact prepared custom Stage-2 build is already connected. If so, it verifies and repairs the Stage-2 auto-boot prerequisite if needed, then starts the current cumulative restore-entry test immediately. Otherwise it automatically runs the proven M1 DFU → iBSS → Stage-1 prerequisites → iBEC/go → fresh Stage-2 chain first. The test stops before restored/usbmux restore payload traffic or erase operations."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Run current test") { _, _ -> start() }
@@ -105,8 +106,9 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
                 if (alreadyStage2 != null) {
                     log(
                         activity,
-                        "Automated current test: exact custom Stage-2 already connected device=${alreadyStage2.deviceName} boot-stage=2 build-version=$expectedStage2Build; starting cumulative restore-entry delegate immediately"
+                        "Automated current test: exact custom Stage-2 already connected device=${alreadyStage2.deviceName} boot-stage=2 build-version=$expectedStage2Build; normalizing cumulative-test prerequisites"
                     )
+                    normalizeStage2AutoBoot(activity, usb, alreadyStage2, expectedStage2Build)
                     startStage2Delegate(activity)
                     waitForStage2DelegateCompletion(activity)
                     log(activity, "Automated current test: cumulative delegate returned; direct Stage-2 run complete")
@@ -144,8 +146,9 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
                         val handoffMs = (SystemClock.elapsedRealtime() - releasedAt).coerceAtLeast(0L)
                         log(
                             activity,
-                            "Automated current test: fresh custom Stage-2 handoff START device=${stage2.deviceName} boot-stage=2 build-version=$expectedStage2Build latencyAfterReservationReleaseMs=$handoffMs; invoking cumulative delegate without user input"
+                            "Automated current test: fresh custom Stage-2 handoff START device=${stage2.deviceName} boot-stage=2 build-version=$expectedStage2Build latencyAfterReservationReleaseMs=$handoffMs; normalizing cumulative-test prerequisites"
                         )
+                        normalizeStage2AutoBoot(activity, usb, stage2, expectedStage2Build)
                         startStage2Delegate(activity)
                         waitForStage2DelegateCompletion(activity)
                         log(activity, "Automated current test: cumulative delegate returned; automated handoff complete")
@@ -165,6 +168,68 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
                 inFlight.set(false)
                 activity.runOnUiThread { if (isAttachedToWindow) refreshState() }
             }
+        }
+    }
+
+    private fun normalizeStage2AutoBoot(
+        activity: AppCompatActivity,
+        usb: UsbManager,
+        device: UsbDevice,
+        expectedBuild: String
+    ) {
+        var connection: android.hardware.usb.UsbDeviceConnection? = null
+        try {
+            connection = usb.openDevice(device) ?: error("Could not open exact custom Stage-2 for prerequisite normalization")
+            val claimed = AppleUsb.claimBestInterface(device, connection)
+                ?: error("Could not claim exact custom Stage-2 Recovery interface for prerequisite normalization")
+            val command = RecoveryTransport(connection, claimed.bulkIn)
+
+            val stage = command.getenv("boot-stage").value.trim()
+            val build = command.getenv("build-version").value.trim()
+            require(stage == STAGE_2) { "Stage-2 prerequisite proof changed before normalization: boot-stage='$stage'" }
+            require(build == expectedBuild) {
+                "Stage-2 prerequisite proof changed before normalization: build-version='$build' expected='$expectedBuild'"
+            }
+
+            val autoBoot = command.getenv("auto-boot").value.trim()
+            if (autoBoot.equals("true", ignoreCase = true)) {
+                log(
+                    activity,
+                    "Automated current test: Stage-2 prerequisite READY boot-stage=2 build-version=$expectedBuild auto-boot=true; no repair needed"
+                )
+                return
+            }
+
+            require(autoBoot.equals("false", ignoreCase = true)) {
+                "Unexpected Stage-2 auto-boot value before cumulative test: '$autoBoot'"
+            }
+
+            log(
+                activity,
+                "Automated current test: stale Stage-2 auto-boot=false detected; repairing to auto-boot=true before cumulative delegate"
+            )
+            val setBytes = command.sendCommand("setenv auto-boot true")
+            val saveBytes = command.sendCommand("saveenv")
+            val verifiedStage = command.getenv("boot-stage").value.trim()
+            val verifiedBuild = command.getenv("build-version").value.trim()
+            val verifiedAutoBoot = command.getenv("auto-boot").value.trim()
+
+            require(verifiedStage == STAGE_2) {
+                "boot-stage changed during cumulative auto-boot repair: '$verifiedStage'"
+            }
+            require(verifiedBuild == expectedBuild) {
+                "build-version changed during cumulative auto-boot repair: '$verifiedBuild' expected='$expectedBuild'"
+            }
+            require(verifiedAutoBoot.equals("true", ignoreCase = true)) {
+                "cumulative auto-boot repair verification failed: '$verifiedAutoBoot'"
+            }
+
+            log(
+                activity,
+                "Automated current test: Stage-2 prerequisite REPAIRED setenvBytes=$setBytes saveenvBytes=$saveBytes boot-stage=2 build-version=$expectedBuild auto-boot=true"
+            )
+        } finally {
+            connection?.close()
         }
     }
 
