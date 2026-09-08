@@ -1,5 +1,6 @@
 package com.idevicerestore.android
 
+import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.SystemClock
@@ -52,7 +53,13 @@ class BootDiagnosticEngine(
             }
             AppleUsb.Mode.RECOVERY -> probeRecovery(device)
             AppleUsb.Mode.APPLE_OTHER -> {
-                record(BootDiagnosticState.NORMAL_OR_OTHER, "Apple USB device is present outside known DFU/Recovery/WTF PIDs")
+                val personality = AppleUsb.personality(device)
+                val message = when (personality) {
+                    AppleUsb.Personality.PORT_DFU -> "Apple Port DFU personality detected"
+                    AppleUsb.Personality.KIS -> "Apple KIS personality detected"
+                    else -> "Apple USB device is present outside known DFU/Recovery/WTF PIDs"
+                }
+                record(BootDiagnosticState.NORMAL_OR_OTHER, message)
                 snapshot(BootDiagnosticState.NORMAL_OR_OTHER, device)
             }
         }
@@ -126,10 +133,275 @@ class BootDiagnosticEngine(
             deviceDescription = device?.let { AppleUsb.describe(it) },
             events = events.toList(),
             findings = findingsFor(state),
+            tests = functionalTestsFor(state, device, recovery),
             recovery = recovery
         )
+        result.tests.forEach { test ->
+            logger.log("TEST ${test.id}: ${test.status}: ${test.detail}")
+        }
         logger.writeSummary(result)
         return result
+    }
+
+    private fun functionalTestsFor(
+        state: BootDiagnosticState,
+        device: UsbDevice?,
+        recovery: RecoveryDiagnosticSession.Snapshot?
+    ): List<BootDiagnosticTestResult> {
+        val tests = mutableListOf<BootDiagnosticTestResult>()
+
+        fun add(id: String, title: String, status: DiagnosticTestStatus, detail: String) {
+            tests += BootDiagnosticTestResult(id, title, status, detail)
+        }
+
+        if (device == null) {
+            add(
+                "usb.apple.enumeration",
+                "Apple USB enumeration",
+                DiagnosticTestStatus.BLOCKED,
+                "No Apple USB device is currently enumerated. Connect the device in its present boot state and run again."
+            )
+            return tests
+        }
+
+        add(
+            "usb.apple.enumeration",
+            "Apple USB enumeration",
+            if (device.vendorId == AppleUsb.APPLE_VID) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Observed VID=%04X PID=%04X with ${device.interfaceCount} interface(s).".format(device.vendorId, device.productId)
+        )
+
+        val personality = AppleUsb.personality(device)
+        val knownPersonality = personality != AppleUsb.Personality.APPLE_OTHER
+        add(
+            "usb.personality.classification",
+            "Known Apple boot personality classification",
+            if (knownPersonality) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.OBSERVED,
+            "Observed personality=$personality mode=${AppleUsb.mode(device)}. Known profiles include DFU, Port DFU, Recovery, KIS, and WTF."
+        )
+
+        val hasPermission = usbManager.hasPermission(device)
+        add(
+            "usb.permission",
+            "Android USB permission",
+            if (hasPermission) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.BLOCKED,
+            if (hasPermission) "Android granted access to this USB device." else "Permission is required before descriptor and transport tests can run."
+        )
+
+        val hasAnyEndpoint = (0 until device.interfaceCount).any { index ->
+            device.getInterface(index).endpointCount > 0
+        }
+        add(
+            "usb.interface.map",
+            "USB interface descriptor map",
+            if (device.interfaceCount > 0) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Interface count=${device.interfaceCount}; endpoint-bearing interface present=$hasAnyEndpoint. Full map is recorded in usb-events.log."
+        )
+
+        if (!hasPermission) return tests
+
+        val identifiers = AppleUsb.bootIdentifiers(device)
+        if (identifiers == null) {
+            add(
+                "boot.identifiers",
+                "Structured iBoot identifiers",
+                DiagnosticTestStatus.OBSERVED,
+                "This personality does not expose structured CPID/BDID/ECID/IBFL boot tags in its USB serial descriptor."
+            )
+        } else {
+            val parsed = listOfNotNull(
+                identifiers.cpidHex?.let { "CPID=$it" },
+                identifiers.bdidHex?.let { "BDID=$it" },
+                identifiers.ibflHex?.let { "IBFL=$it" },
+                identifiers.prevHex?.let { "PREV=$it" }
+            )
+            add(
+                "boot.identifiers",
+                "Structured iBoot identifiers",
+                if (parsed.isNotEmpty()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.OBSERVED,
+                parsed.joinToString().ifBlank { "Descriptor was readable but contained no currently parsed boot tags." }
+            )
+            identifiers.image4Aware?.let { aware ->
+                add(
+                    "boot.image4-awareness",
+                    "Image4-awareness flag",
+                    if (aware) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.OBSERVED,
+                    "IBFL reports Image4-aware=$aware."
+                )
+            }
+            if (identifiers.cpid == 0x8103) {
+                add(
+                    "profile.apple-silicon-m1",
+                    "Known Apple Silicon M1 profile",
+                    DiagnosticTestStatus.PASSED,
+                    "CPID=0x8103 matches the hardware profile used for the currently proven M1 DFU → Stage-2 path."
+                )
+            } else {
+                add(
+                    "profile.apple-silicon-m1",
+                    "Known Apple Silicon M1 profile",
+                    DiagnosticTestStatus.NOT_APPLICABLE,
+                    "Observed CPID=${identifiers.cpidHex ?: "unknown"}; the proven M1-specific profile requires CPID=8103."
+                )
+            }
+        }
+
+        when (personality) {
+            AppleUsb.Personality.DFU, AppleUsb.Personality.PORT_DFU -> {
+                val dfuInterface = (0 until device.interfaceCount)
+                    .map { device.getInterface(it) }
+                    .firstOrNull {
+                        it.interfaceClass == UsbConstants.USB_CLASS_APP_SPEC && it.interfaceSubclass == 1
+                    }
+                add(
+                    "dfu.interface.profile",
+                    "DFU interface profile",
+                    if (dfuInterface != null) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+                    dfuInterface?.let {
+                        "Found application-specific DFU interface id=${it.id} alt=${it.alternateSetting} endpoints=${it.endpointCount}."
+                    } ?: "No application-specific subclass-1 DFU interface was found."
+                )
+                add(
+                    "recovery.command-transport",
+                    "Recovery command transport",
+                    DiagnosticTestStatus.NOT_APPLICABLE,
+                    "The device is currently in $personality, so iBoot Recovery getenv transport is not expected."
+                )
+            }
+            AppleUsb.Personality.RECOVERY -> appendRecoveryTests(tests, state, recovery)
+            AppleUsb.Personality.WTF -> add(
+                "wtf.personality",
+                "WTF/pre-DFU recognition",
+                DiagnosticTestStatus.PASSED,
+                "PID=%04X is classified as Apple's WTF/pre-DFU personality.".format(device.productId)
+            )
+            AppleUsb.Personality.KIS -> add(
+                "kis.personality",
+                "KIS recognition",
+                DiagnosticTestStatus.PASSED,
+                "PID=%04X is classified as Apple's KIS personality.".format(device.productId)
+            )
+            AppleUsb.Personality.APPLE_OTHER -> add(
+                "boot.known-personality",
+                "Known boot personality",
+                DiagnosticTestStatus.OBSERVED,
+                "This Apple PID is not yet mapped to a supported boot personality. Preserve this session as evidence for future device support."
+            )
+        }
+
+        add(
+            "usb.transition-history",
+            "Boot-state transition history",
+            if (events.size > 1) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.OBSERVED,
+            if (events.size > 1) {
+                "${events.size} diagnostic event(s) have been captured in this session; timing between state changes is preserved."
+            } else {
+                "Only one state has been observed so far. Leave Diagnostics open while reproducing the boot issue to capture transitions."
+            }
+        )
+
+        return tests
+    }
+
+    private fun appendRecoveryTests(
+        tests: MutableList<BootDiagnosticTestResult>,
+        state: BootDiagnosticState,
+        recovery: RecoveryDiagnosticSession.Snapshot?
+    ) {
+        fun add(id: String, title: String, status: DiagnosticTestStatus, detail: String) {
+            tests += BootDiagnosticTestResult(id, title, status, detail)
+        }
+
+        if (recovery == null) {
+            add(
+                "recovery.command-transport",
+                "Recovery command transport",
+                if (state == BootDiagnosticState.RECOVERY_UNRESPONSIVE) DiagnosticTestStatus.FAILED else DiagnosticTestStatus.BLOCKED,
+                "Recovery USB is visible, but no successful read-only iBoot snapshot was produced."
+            )
+            return
+        }
+
+        val readiness = recovery.readiness
+        add(
+            "recovery.command-transport",
+            "Recovery command transport",
+            if (readiness.commandTransportReady) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            if (readiness.commandTransportReady) {
+                "Repeated read-only iBoot getenv exchanges completed successfully."
+            } else {
+                readiness.reasons.joinToString("; ").ifBlank { "Core iBoot queries did not establish a healthy command transport." }
+            }
+        )
+        add(
+            "recovery.build-version",
+            "iBoot build-version query",
+            if (!readiness.buildVersion.isNullOrBlank()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Observed build-version=${readiness.buildVersion ?: "no response"}."
+        )
+        add(
+            "recovery.build-style",
+            "iBoot build-style query",
+            if (!readiness.buildStyle.isNullOrBlank()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Observed build-style=${readiness.buildStyle ?: "no response"}."
+        )
+        add(
+            "recovery.auto-boot",
+            "auto-boot state query",
+            if (!readiness.autoBoot.isNullOrBlank()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Observed auto-boot=${readiness.autoBoot ?: "no response"}. This test does not mutate the value."
+        )
+        add(
+            "recovery.boot-stage",
+            "boot-stage query",
+            if (!readiness.bootStage.isNullOrBlank()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            "Observed boot-stage=${readiness.bootStage ?: "no response"}."
+        )
+
+        val repeated = recovery.variables.groupBy { it.name }.filterValues { it.size > 1 }
+        val repeatedFailures = repeated.values.flatten().count { it.result == null }
+        val mismatches = repeated.mapNotNull { (name, values) ->
+            val returned = values.mapNotNull { it.result?.value }.distinct()
+            if (returned.size > 1) "$name=${returned.joinToString("/")}" else null
+        }
+        add(
+            "recovery.query-stability",
+            "Repeated Recovery query stability",
+            if (repeatedFailures == 0 && mismatches.isEmpty()) DiagnosticTestStatus.PASSED else DiagnosticTestStatus.FAILED,
+            when {
+                repeatedFailures > 0 -> "$repeatedFailures repeated core query exchange(s) failed."
+                mismatches.isNotEmpty() -> "Repeated queries returned inconsistent values: ${mismatches.joinToString()}."
+                else -> "Repeated build-version/auto-boot/boot-stage queries remained stable across the diagnostic sequence."
+            }
+        )
+
+        val stage = readiness.bootStage?.trim()
+        add(
+            "profile.stage2",
+            "Known Stage-2 Recovery profile",
+            if (stage == "2") DiagnosticTestStatus.PASSED else DiagnosticTestStatus.NOT_APPLICABLE,
+            if (stage == "2") {
+                "boot-stage=2 is present; this is the stage required by the currently proven cumulative Stage-2 validation path."
+            } else {
+                "Observed boot-stage=${stage ?: "unknown"}; exact Stage-2 proof requires boot-stage=2 plus the expected prepared build."
+            }
+        )
+
+        val console = recovery.console
+        add(
+            "recovery.console-read",
+            "Recovery console read path",
+            when {
+                recovery.consoleError != null -> DiagnosticTestStatus.FAILED
+                console != null && console.bytes > 0 -> DiagnosticTestStatus.PASSED
+                else -> DiagnosticTestStatus.OBSERVED
+            },
+            when {
+                recovery.consoleError != null -> "Console read failed: ${recovery.consoleError.message ?: recovery.consoleError.javaClass.simpleName}."
+                console != null && console.bytes > 0 -> "Read ${console.bytes} byte(s) from the Recovery console interface without sending data."
+                else -> "Console transport opened without captured output; silence is not by itself a failure."
+            }
+        )
     }
 
     private fun findingsFor(state: BootDiagnosticState): List<BootDiagnosticFinding> {
@@ -160,9 +432,9 @@ class BootDiagnosticEngine(
                 recommendation = "Retry with a direct USB connection/cable, then compare repeated sessions before treating this as a device-side firmware failure."
             )
             BootDiagnosticState.NORMAL_OR_OTHER -> findings += BootDiagnosticFinding(
-                title = "Device is outside known DFU/Recovery/WTF modes",
+                title = "Device is outside the currently exercised DFU/Recovery/WTF path",
                 confidence = DiagnosticConfidence.INSUFFICIENT_EVIDENCE,
-                detail = "An Apple USB device is present, but its PID is not one of the boot-mode identifiers currently classified by iDeviceRestore."
+                detail = "An Apple USB device is present. Known Port DFU and KIS personalities are recorded separately, while unknown PIDs are preserved as evidence for future support."
             )
             else -> Unit
         }
