@@ -67,7 +67,7 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
         AlertDialog.Builder(activity)
             .setTitle("Run Stage-2 firmware + ramdisk activation test?")
             .setMessage(
-                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads the personalized RestoreRamDisk, sends upstream 'getenv ramdisk-delay' and then 'ramdisk', waits 2 seconds, and records the resulting iBoot state. " +
+                "This bounded test requires an M1 already at boot-stage=2 and auto-boot=true. It sends the proven non-Stage1 IsLoadedByiBoot firmware batch, uploads the personalized RestoreRamDisk, treats upstream 'getenv ramdisk-delay' as best-effort, then sends 'ramdisk', waits 2 seconds, and records the resulting iBoot state. " +
                     "It does not send setenv, saveenv, RestoreLogo, DeviceTree, SEP, KernelCache, boot arguments, bootx, restore, or erase."
             )
             .setNegativeButton("Cancel", null)
@@ -218,10 +218,23 @@ class Stage2FirmwareBatchTestButton @JvmOverloads constructor(
                         )
                 )
 
+                log(activity, "Stage-2 RestoreRamDisk post-upload verification START")
                 verifyStableStage2(command, buildBefore, "after RestoreRamDisk upload")
+                log(activity, "Stage-2 RestoreRamDisk post-upload verification PASS: boot-stage=2 build-version=$buildBefore auto-boot=true")
 
-                val delayQueryBytes = command.sendCommand("getenv ramdisk-delay")
-                log(activity, "Stage-2 RestoreRamDisk activation precommand COMPLETE: getenv ramdisk-delay bytes=$delayQueryBytes")
+                log(activity, "Stage-2 RestoreRamDisk activation precommand START: getenv ramdisk-delay bestEffort=true")
+                runCatching { command.sendCommand("getenv ramdisk-delay") }
+                    .onSuccess { bytes ->
+                        log(activity, "Stage-2 RestoreRamDisk activation precommand COMPLETE: getenv ramdisk-delay bytes=$bytes bestEffort=true")
+                    }
+                    .onFailure { error ->
+                        log(
+                            activity,
+                            "Stage-2 RestoreRamDisk activation precommand FAILED-BEST-EFFORT: getenv ramdisk-delay ${error.javaClass.simpleName}: ${error.message}; continuing to ramdisk per upstream semantics"
+                        )
+                    }
+
+                log(activity, "Stage-2 RestoreRamDisk activation command START: ramdisk")
                 val ramdiskCommandBytes = command.sendCommand("ramdisk")
                 log(activity, "Stage-2 RestoreRamDisk activation command COMPLETE: ramdisk bytes=$ramdiskCommandBytes; settling ${RAMDISK_SETTLE_MS}ms")
                 Thread.sleep(RAMDISK_SETTLE_MS)
