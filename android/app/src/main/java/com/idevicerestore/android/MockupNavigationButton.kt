@@ -8,12 +8,7 @@ import android.view.View
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-/**
- * Presentation-only routing for the mockup-driven shell.
- *
- * The normal app exposes verified functions only. Unverified restore work is not reachable here;
- * active development and device-specific testing opens BootDiagnosticsActivity instead.
- */
+/** Presentation-only routing for the reference-matched shell. */
 class MockupNavigationButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -22,18 +17,6 @@ class MockupNavigationButton @JvmOverloads constructor(
 
     init {
         setOnClickListener { route(tag?.toString()) }
-    }
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        when (tag?.toString()) {
-            ACTION_RESTORE -> visibility = View.GONE
-            ACTION_UPDATE -> text = "Firmware\nSigned downloads"
-            ACTION_DIAGNOSTICS -> text = when (id) {
-                R.id.quickDiagnosticsButton -> "Boot Diagnostics\nDevelopment & testing"
-                else -> text
-            }
-        }
     }
 
     private fun route(action: String?) {

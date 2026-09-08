@@ -4,13 +4,19 @@
     <color name="mock_background">#000000</color>
     <color name="mock_surface">#1C1C1E</color>
     <color name="mock_surface_secondary">#2C2C2E</color>
+    <color name="mock_surface_tertiary">#3A3A3C</color>
+    <color name="mock_selected_row">#163A5F</color>
     <color name="mock_text_primary">#F5F5F7</color>
     <color name="mock_text_secondary">#98989D</color>
+    <color name="mock_text_tertiary">#8E8E93</color>
     <color name="mock_separator">#38383A</color>
     <color name="mock_success">#30D158</color>
+    <color name="mock_success_surface">#153C22</color>
     <color name="mock_warning">#FF9F0A</color>
     <color name="mock_restore">#0A84FF</color>
     <color name="mock_update">#BF5AF2</color>
     <color name="mock_diagnostics">#30D158</color>
     <color name="mock_tools">#AEAEB2</color>
+    <color name="mock_nav_border">#38383A</color>
+    <color name="mock_progress_track">#3A3A3C</color>
 </resources>

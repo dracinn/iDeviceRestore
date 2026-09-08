@@ -1,16 +1,22 @@
 <resources>
     <color name="mock_primary">#0A84FF</color>
-    <color name="mock_primary_dark">#006EDC</color>
+    <color name="mock_primary_dark">#0066D6</color>
     <color name="mock_background">#F2F2F7</color>
     <color name="mock_surface">#FFFFFF</color>
     <color name="mock_surface_secondary">#F7F7FA</color>
-    <color name="mock_text_primary">#111114</color>
-    <color name="mock_text_secondary">#6E6E73</color>
-    <color name="mock_separator">#E5E5EA</color>
-    <color name="mock_success">#34C759</color>
+    <color name="mock_surface_tertiary">#ECECF1</color>
+    <color name="mock_selected_row">#EAF4FF</color>
+    <color name="mock_text_primary">#0C0C0E</color>
+    <color name="mock_text_secondary">#66666B</color>
+    <color name="mock_text_tertiary">#8E8E93</color>
+    <color name="mock_separator">#DADAE0</color>
+    <color name="mock_success">#24B448</color>
+    <color name="mock_success_surface">#E8F7EC</color>
     <color name="mock_warning">#FF9F0A</color>
     <color name="mock_restore">#0A84FF</color>
-    <color name="mock_update">#7C5CFC</color>
-    <color name="mock_diagnostics">#30B15A</color>
-    <color name="mock_tools">#8E8E93</color>
+    <color name="mock_update">#7B61FF</color>
+    <color name="mock_diagnostics">#34C759</color>
+    <color name="mock_tools">#6B7280</color>
+    <color name="mock_nav_border">#D5D5DA</color>
+    <color name="mock_progress_track">#D9D9DE</color>
 </resources>
