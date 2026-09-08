@@ -13,8 +13,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * User-facing Stage-2 boot action. The proven PrearmedStage1IbecButton remains the implementation
- * backing this control, but its older diagnostic wording is kept out of the primary UI.
+ * Diagnostics-only Stage-2 boot action. The proven PrearmedStage1IbecButton remains the
+ * implementation backing this control, but this button must never be treated as a prerequisite
+ * for the cumulative hardware test. Run Current Stage-2 Test owns the automated DFU-to-current
+ * boundary path.
  *
  * After the bounded DFU -> Stage-2 transition releases its USB reservation, this wrapper also
  * normalizes a stale persisted auto-boot=false left by an interrupted restore-entry attempt. The
@@ -38,8 +40,16 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
 
     init {
         text = LABEL
+        contentDescription = "Diagnostics only: boot Stage 2 Recovery"
         isEnabled = false
         setOnClickListener {
+            val activity = activity()
+            if (activity != null) {
+                log(
+                    activity,
+                    "Stage-2 diagnostic only: this action is not a prerequisite for Run Current Stage-2 Test; cumulative tests automate DFU through the current boundary"
+                )
+            }
             val started = rootView.findViewById<PrearmedStage1IbecButton?>(R.id.prearmedStage1IbecButton)
                 ?.performClick() == true
             if (started) armAutoBootRepair()
@@ -165,6 +175,6 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
         private const val REPAIR_WINDOW_MS = 130_000L
         private const val M1_CPID = "8103"
         private const val STAGE_2 = "2"
-        private const val LABEL = "Boot Stage 2 Recovery"
+        private const val LABEL = "Diagnostic: Boot Stage 2 Only"
     }
 }
