@@ -8,89 +8,83 @@
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:overScrollMode="never">
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="18dp">
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="18dp">
 
-            <TextView
-                style="@style/TextAppearance.IDeviceRestore.ScreenTitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Settings" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="42dp" android:gravity="center_vertical" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/doneButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="36dp" android:layout_height="36dp" android:minWidth="0dp" android:text="‹" android:textColor="@color/mock_text_primary" android:textSize="28sp" app:backgroundTint="@android:color/transparent" />
+                <TextView style="@style/TextAppearance.IDeviceRestore.ScreenTitle" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Settings" />
+                <TextView android:layout_width="28dp" android:layout_height="36dp" android:gravity="center" android:text="⋮" android:textColor="@color/mock_text_primary" android:textSize="22sp" />
+            </LinearLayout>
 
-            <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="App behavior, downloads, appearance, and diagnostics." />
-
-            <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp" android:text="App Behavior" />
-            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/includeBetaFirmwareSwitch"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Include beta and RC firmware" />
-                    <TextView
-                        android:id="@+id/betaFirmwareSummary"
-                        style="@style/TextAppearance.IDeviceRestore.Caption"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="7dp"
-                        android:text="Also check beta and release-candidate indexes, while still requiring Apple signing verification." />
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="30dp" android:gravity="center_vertical" android:paddingStart="10dp" android:text="App Behavior" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
+                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Automatically detect devices" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Check for app updates at launch" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="false" android:text="Use verbose logging" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/includeBetaFirmwareSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Include beta and RC firmware" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <TextView android:id="@+id/betaFirmwareSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="8dp" android:text="Apple signing is still reverified before use." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:text="Downloads" />
             <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Firmware storage" android:textColor="@color/mock_text_primary" android:textSize="15sp" android:textStyle="bold" />
-                    <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Uses the iDeviceRestore firmware directory and official aria2c segmented/resumable downloads from Apple CDN sources." />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="30dp" android:gravity="center_vertical" android:paddingStart="10dp" android:text="Downloads" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="8dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Default Download Directory" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="/storage/emulated/0/iDeviceRestore" android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
+                        </LinearLayout>
+                        <TextView android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:text="›" android:textColor="@color/mock_text_secondary" android:textSize="20sp" />
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
+                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="52dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Organize firmware by device" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="42dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="8dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Concurrent Downloads" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3   ›" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:text="Appearance" />
             <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
-                    <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Theme" />
-                    <RadioGroup
-                        android:id="@+id/appearanceRadioGroup"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:background="@color/mock_surface_secondary"
-                        android:orientation="horizontal"
-                        android:padding="4dp">
-                        <RadioButton android:id="@+id/appearanceLightRadio" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:button="@null" android:gravity="center" android:text="Light" android:textColor="@color/mock_text_primary" />
-                        <RadioButton android:id="@+id/appearanceDarkRadio" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:button="@null" android:gravity="center" android:text="Dark" android:textColor="@color/mock_text_primary" />
-                        <RadioButton android:id="@+id/appearanceSystemRadio" android:layout_width="0dp" android:layout_height="42dp" android:layout_weight="1" android:button="@null" android:gravity="center" android:text="System" android:textColor="@color/mock_text_primary" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingBottom="8dp">
+                    <TextView android:layout_width="match_parent" android:layout_height="30dp" android:gravity="center_vertical" android:paddingStart="10dp" android:text="Appearance" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
+                    <RadioGroup android:id="@+id/appearanceRadioGroup" android:layout_width="match_parent" android:layout_height="66dp" android:orientation="horizontal" android:paddingStart="8dp" android:paddingEnd="8dp">
+                        <RadioButton android:id="@+id/appearanceLightRadio" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginEnd="4dp" android:layout_weight="1" android:background="@drawable/mock_reference_card" android:button="@null" android:gravity="center" android:text="▣\nLight" android:textColor="@color/mock_text_primary" android:textSize="10sp" />
+                        <RadioButton android:id="@+id/appearanceDarkRadio" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:layout_weight="1" android:background="@drawable/mock_reference_card" android:button="@null" android:gravity="center" android:text="◼\nDark" android:textColor="@color/mock_text_primary" android:textSize="10sp" />
+                        <RadioButton android:id="@+id/appearanceSystemRadio" android:layout_width="0dp" android:layout_height="match_parent" android:layout_marginStart="4dp" android:layout_weight="1" android:background="@drawable/mock_reference_card" android:button="@null" android:gravity="center" android:text="◧\nSystem" android:textColor="@color/mock_text_primary" android:textSize="10sp" />
                     </RadioGroup>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <TextView style="@style/TextAppearance.IDeviceRestore.SectionTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:text="About" />
             <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="9dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
-                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/mock_text_primary" android:textSize="16sp" android:textStyle="bold" />
-                    <TextView style="@style/TextAppearance.IDeviceRestore.Caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Android restore and recovery tooling for supported Apple devices." />
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/openBootDiagnosticsButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:text="Open Boot Diagnostics" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <TextView android:layout_width="match_parent" android:layout_height="30dp" android:gravity="center_vertical" android:paddingStart="10dp" android:text="About" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="64dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="10dp">
+                        <ImageView android:layout_width="46dp" android:layout_height="46dp" android:background="@drawable/mock_asset_restore" android:contentDescription="iDeviceRestore" android:padding="7dp" android:src="@drawable/ic_tools" app:tint="@android:color/white" />
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Current build" android:textColor="@color/mock_text_secondary" android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="6dp" android:text="Restore. Update. Diagnose. For Apple devices." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/openBootDiagnosticsButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="38dp" android:gravity="start|center_vertical" android:text="Open Boot Diagnostics    ›" android:textColor="@color/mock_primary" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/doneButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="Done" />
         </LinearLayout>
     </ScrollView>
 </com.idevicerestore.android.InsetAwareShellLayout>
