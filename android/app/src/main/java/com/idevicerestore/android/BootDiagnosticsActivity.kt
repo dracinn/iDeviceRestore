@@ -24,6 +24,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     private lateinit var stateView: TextView
     private lateinit var deviceView: TextView
     private lateinit var recoveryView: TextView
+    private lateinit var testMatrixView: TextView
     private lateinit var findingsView: TextView
     private lateinit var timelineView: TextView
     private lateinit var logPathView: TextView
@@ -72,7 +73,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
         logger.log("Boot diagnostic session started")
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        logger.log("Read-only mode: no boot, reboot, environment mutation, upload, revive, or restore commands")
+        logger.log("Functional test mode: read-only USB/Recovery evidence; no boot, reboot, environment mutation, upload, revive, restore, or erase commands")
         logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
         runDiagnostic(requestPermission = true)
     }
@@ -100,29 +101,40 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Observe Apple USB boot states and run read-only Recovery/iBoot checks without starting a restore."
+            text = "Functional validation for every boot-state fact iDeviceRestore currently knows how to observe. Run these tests before adding device-specific support or treating a behavior as a bug."
             textSize = 14f
             setPadding(0, dp(4), 0, dp(14))
         })
 
         stateView = section(root, "Current state", "Waiting for scan", 20f)
         deviceView = section(root, "Detected device", "No Apple USB device", 14f)
-        recoveryView = section(root, "Recovery details", "No Recovery snapshot yet", 13f, monospace = true)
+        recoveryView = section(root, "Observed boot evidence", "No Recovery snapshot yet", 13f, monospace = true)
 
         runButton = Button(this).apply {
-            text = "Run diagnostic scan"
+            text = "Run all functional diagnostic tests"
             setOnClickListener { runDiagnostic(requestPermission = true) }
         }
         root.addView(runButton)
 
-        findingsView = section(root, "Findings", "No findings yet", 14f)
-        timelineView = section(root, "Diagnostic timeline", "No events yet", 12f, monospace = true)
+        testMatrixView = section(
+            root,
+            "Functional test matrix",
+            "No tests have run yet.",
+            13f,
+            monospace = true
+        )
+        findingsView = section(root, "Diagnostic findings", "No findings yet", 14f)
+        timelineView = section(root, "Boot-state timeline", "No events yet", 12f, monospace = true)
         logPathView = section(root, "Separate diagnostic logs", "Preparing session folder…", 12f, monospace = true)
 
         root.addView(TextView(this).apply {
-            text = "This module reports only what can be supported by externally observable USB/Recovery evidence. Internal hardware faults may remain indeterminate."
+            text = "Test statuses: PASSED confirms the observed capability, FAILED means an expected test for the current personality did not work, BLOCKED means the prerequisite is missing, OBSERVED records useful evidence without treating it as a failure, and NOT_APPLICABLE keeps device-specific knowledge visible without misclassifying other devices."
             textSize = 12f
-            setPadding(0, dp(16), 0, 0)
+            setPadding(0, dp(16), 0, dp(8))
+        })
+        root.addView(TextView(this).apply {
+            text = "This diagnostic suite is intentionally non-destructive. Stage-2 boot and cumulative restore-entry validation remain separate explicit hardware tests so diagnostic observation cannot silently alter boot variables or send restore payloads."
+            textSize = 12f
         })
         return scroll
     }
@@ -166,7 +178,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
-        stateView.text = "Scanning…"
+        stateView.text = "Running functional tests…"
         worker.execute {
             beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
@@ -181,6 +193,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
                             confidence = DiagnosticConfidence.INSUFFICIENT_EVIDENCE,
                             detail = error.message ?: error.javaClass.simpleName
                         )
+                    ),
+                    tests = listOf(
+                        BootDiagnosticTestResult(
+                            id = "diagnostic.engine",
+                            title = "Diagnostic engine execution",
+                            status = DiagnosticTestStatus.FAILED,
+                            detail = error.message ?: error.javaClass.simpleName
+                        )
                     )
                 )
             }
@@ -192,7 +212,13 @@ class BootDiagnosticsActivity : AppCompatActivity() {
     }
 
     private fun render(snapshot: BootDiagnosticSnapshot) {
-        stateView.text = snapshot.state.name.replace('_', ' ')
+        val passed = snapshot.tests.count { it.status == DiagnosticTestStatus.PASSED }
+        val failed = snapshot.tests.count { it.status == DiagnosticTestStatus.FAILED }
+        val blocked = snapshot.tests.count { it.status == DiagnosticTestStatus.BLOCKED }
+        stateView.text = buildString {
+            append(snapshot.state.name.replace('_', ' '))
+            if (snapshot.tests.isNotEmpty()) append("  •  $passed passed / $failed failed / $blocked blocked")
+        }
         deviceView.text = snapshot.deviceDescription ?: "No Apple USB device detected"
         recoveryView.text = snapshot.recovery?.let { recovery ->
             buildString {
@@ -207,9 +233,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
                 }
                 append("consoleBytes=${recovery.console?.bytes ?: 0}")
             }
-        } ?: "No Recovery snapshot yet"
+        } ?: "No Recovery snapshot for the current personality. USB descriptors and boot identifiers are still tested where available."
+
+        testMatrixView.text = snapshot.tests.joinToString("\n\n") { test ->
+            "[${test.status}] ${test.title}\n${test.id}\n${test.detail}"
+        }.ifBlank { "No tests produced." }
+
         findingsView.text = if (snapshot.findings.isEmpty()) {
-            "No conclusive finding yet. Connect the affected Mac in its current boot state and scan again."
+            "No conclusive finding yet. Connect the affected device in its current boot state and leave this screen open while reproducing the problem."
         } else {
             snapshot.findings.joinToString("\n\n") { finding ->
                 buildString {
