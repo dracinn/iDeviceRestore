@@ -119,32 +119,38 @@ class AutomatedStage2TestButton @JvmOverloads constructor(
 
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
                 val deadline = SystemClock.elapsedRealtime() + STAGE2_WAIT_MS
-                var stage2SeenAt: Long? = null
+                var reservationObserved = false
+                var releasedAt: Long? = null
 
                 while (!Thread.currentThread().isInterrupted && SystemClock.elapsedRealtime() < deadline) {
+                    if (UsbOperationReservation.isReserved()) {
+                        reservationObserved = true
+                        Thread.sleep(HANDOFF_POLL_MS)
+                        continue
+                    }
+
+                    if (!reservationObserved) {
+                        Thread.sleep(HANDOFF_POLL_MS)
+                        continue
+                    }
+
+                    if (releasedAt == null) releasedAt = SystemClock.elapsedRealtime()
                     val stage2 = findExpectedStage2(usb, expectedStage2Build)
                     if (stage2 != null) {
-                        if (stage2SeenAt == null) {
-                            stage2SeenAt = SystemClock.elapsedRealtime()
-                            log(
-                                activity,
-                                "Automated current test: fresh custom Stage-2 detected device=${stage2.deviceName} build-version=$expectedStage2Build; waiting only for pre-armed reservation release"
-                            )
-                        }
-
-                        if (!UsbOperationReservation.isReserved()) {
-                            val handoffMs = (SystemClock.elapsedRealtime() - (stage2SeenAt ?: SystemClock.elapsedRealtime())).coerceAtLeast(0L)
-                            log(activity, "Automated current test: Stage-2 handoff START latencyMs=$handoffMs; invoking cumulative restore-entry delegate without user input")
-                            startStage2Delegate(activity)
-                            waitForStage2DelegateCompletion(activity)
-                            log(activity, "Automated current test: cumulative delegate returned; automated handoff complete")
-                            return@execute
-                        }
+                        val handoffMs = (SystemClock.elapsedRealtime() - releasedAt).coerceAtLeast(0L)
+                        log(
+                            activity,
+                            "Automated current test: fresh custom Stage-2 handoff START device=${stage2.deviceName} build-version=$expectedStage2Build latencyAfterReservationReleaseMs=$handoffMs; invoking cumulative delegate without user input"
+                        )
+                        startStage2Delegate(activity)
+                        waitForStage2DelegateCompletion(activity)
+                        log(activity, "Automated current test: cumulative delegate returned; automated handoff complete")
+                        return@execute
                     }
                     Thread.sleep(HANDOFF_POLL_MS)
                 }
 
-                error("Timed out waiting for the exact custom Stage-2 environment and reservation handoff")
+                error("Timed out waiting for the exact custom Stage-2 environment after the pre-armed boot transaction")
             } catch (t: Throwable) {
                 log(activity, "Automated current test FAILED: ${t.javaClass.simpleName}: ${t.message}")
             } finally {
