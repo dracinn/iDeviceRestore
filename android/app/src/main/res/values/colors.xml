@@ -5,6 +5,7 @@
     <color name="mock_surface">#FFFFFF</color>
     <color name="mock_surface_secondary">#F7F7FA</color>
     <color name="mock_surface_tertiary">#ECECF1</color>
+    <color name="mock_selected_row">#EAF4FF</color>
     <color name="mock_text_primary">#0C0C0E</color>
     <color name="mock_text_secondary">#66666B</color>
     <color name="mock_text_tertiary">#8E8E93</color>
