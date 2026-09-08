@@ -317,6 +317,14 @@
                     android:layout_marginTop="8dp"
                     android:enabled="false"
                     android:text="Test M1 Stage-2 RestoreLogo" />
+
+                <com.idevicerestore.android.Stage2FirmwareBatchTestButton
+                    android:id="@+id/stage2FirmwareBatchTestButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:enabled="false"
+                    android:text="Test M1 Stage-2 Firmware Batch" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
