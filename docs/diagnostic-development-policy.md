@@ -1,37 +1,41 @@
 # Diagnostics-first development policy
 
-Boot Diagnostics is the development and hardware-validation surface for iDeviceRestore. The normal app is reserved for functions that have already been proven on hardware with a defined device scope, bounded failure behavior, and useful logs.
+Boot Diagnostics is the unrestricted development and hardware-validation surface for iDeviceRestore. The normal app is reserved for functions that have already been proven on hardware with an explicit supported-device scope, repeatable behavior, useful logs, and a clear user-facing contract.
 
 ## Development rule
 
-Before adding support for a new Apple device, changing a device-specific boot path, or fixing a hardware-specific behavior, first make the relevant evidence reproducible in Boot Diagnostics. The diagnostic result must distinguish expected success, failure, missing prerequisites, observed-but-unverified evidence, and device-specific non-applicability.
+Before adding support for a new Apple device, changing a device-specific boot path, extending restore behavior, or fixing a hardware-specific issue, first make the relevant behavior reproducible in Boot Diagnostics.
 
-Unknown devices must not inherit M1 assumptions. They should be captured as evidence until their identifiers, USB personality, transport behavior, and safe boundaries are proven.
+Boot Diagnostics is not limited to read-only work. Experimental transport, boot-chain, firmware, environment, restore, mutation, recovery, and device-support code may all be developed and exercised there. Each individual test should accurately state what it currently does, what prerequisites it needs, what it mutates, and what evidence it produces. Those are properties of that test, not global restrictions on the diagnostic surface.
+
+Unknown devices must not inherit assumptions from already-proven hardware. Their identifiers, USB personalities, transport behavior, failures, and successful transitions should be captured as evidence until a device-specific path is established.
 
 ## Main app promotion criteria
 
 A function may be exposed as a normal app feature only after:
 
 1. Its supported device scope is explicit.
-2. Required USB/firmware/signing prerequisites are testable.
+2. Required USB, firmware, signing, and host prerequisites are testable.
 3. Hardware success is repeatable.
-4. Failure behavior is bounded and logged.
-5. Any device mutation is explicitly documented and confirmed by the user.
-6. The stop boundary is enforced in code.
-7. The corresponding diagnostic evidence remains available for future regressions.
+4. Failure behavior is understood and logged.
+5. Device mutations and user-visible consequences are understood.
+6. The intended production behavior is defined and reviewed.
+7. The corresponding diagnostic evidence remains available for regressions.
 
 Unverified or presentation-only controls must not appear interactive in the main app.
 
 ## Boot Diagnostics test classes
 
-### Read-only functional matrix
+Boot Diagnostics may contain any kind of development test needed to advance support. Current tests happen to fall into the following groups, but these are not product-level restrictions.
 
-Safe observation only. It may inspect USB descriptors, Apple boot personality, structured boot identifiers, Recovery getenv values, console input, and transition history. It must not send boot payloads, mutate iBoot environment variables, issue boot/go/bootx, start restore traffic, or erase data.
+### Functional observation tests
+
+The current functional matrix is read-only. It inspects USB descriptors, Apple boot personalities, structured boot identifiers, Recovery getenv values, console input, and transition history. Its read-only nature describes this one test matrix, not Boot Diagnostics as a whole.
 
 ### Active hardware development tests
 
-These require explicit confirmation and show their limitations before execution. Current active tests include the hardware-proven M1 CPID 0x8103 Stage-2 boot path and the current cumulative restore-entry boundary test. Their existing protocol stop boundaries remain unchanged.
+Active tests may send payloads, issue boot commands, modify environment state, exercise restore-entry behavior, or perform other device-affecting operations as development requires. Each test should present its actual scope and prerequisites and log what occurred. Existing M1 Stage-2 and cumulative restore-entry tests retain their currently implemented behavior until intentionally extended by new diagnostic development.
 
-### Future devices
+### Future devices and restore development
 
-New device-specific active tests stay in Boot Diagnostics until the promotion criteria above are satisfied. NOT_APPLICABLE and OBSERVED are preferred over false failures when a device does not match a proven profile.
+New device-specific and restore-development tests stay in Boot Diagnostics until they satisfy the promotion criteria above. OBSERVED and NOT_APPLICABLE remain useful classifications when current knowledge does not yet apply to a device.
