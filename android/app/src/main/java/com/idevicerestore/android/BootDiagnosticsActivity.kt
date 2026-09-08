@@ -75,8 +75,8 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
         logger.log("Boot diagnostic development session started")
         logger.log("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-        logger.log("Policy: new device support and bug fixes are proven here before promotion to the main app")
-        logger.log("Read-only matrix never mutates the device; active hardware tests require explicit confirmation and enforce their documented stop boundaries")
+        logger.log("Policy: Boot Diagnostics is the unrestricted development and hardware-test surface; only verified functions are promoted to the main app")
+        logger.log("Individual development tests may define their own prerequisites, confirmations, and stop boundaries while they are being proven")
         logPathView.text = "Session folder\n${logger.sessionDirectory.absolutePath}"
         runDiagnostic(requestPermission = true)
     }
@@ -104,22 +104,23 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Development and hardware-validation lab. New device behavior must be reproducible here before it is promoted into the normal iDeviceRestore interface."
+            text = "Unrestricted development and hardware-validation lab. New device support, protocol work, restore behavior, mutations, transport experiments, and bug fixes are developed here before verified functionality is promoted into the normal iDeviceRestore interface."
             textSize = 14f
             setPadding(0, dp(4), 0, dp(14))
         })
 
         root.addView(TextView(this).apply {
-            text = "TESTING LIMITATIONS"
+            text = "CURRENT TEST SCOPE"
             textSize = 13f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(0, dp(4), 0, dp(4))
         })
         root.addView(TextView(this).apply {
-            text = "• Read-only functional matrix: safe observation only; no upload, setenv/saveenv, boot/go/bootx, revive, restore, erase, or restored/usbmux traffic.\n" +
-                "• Active Stage-2 boot test: currently restricted to the hardware-proven M1 CPID=8103 path and requires prepared signed firmware/TSS material. It sends boot-chain payloads but stops at verified Stage 2.\n" +
-                "• Current cumulative Stage-2 test: M1-only and explicitly mutates restore-entry environment state as already proven; it stops immediately after the first fresh post-Recovery Apple USB enumeration and before restored/usbmux, restore payloads, or erase.\n" +
-                "• Unknown/future devices are evidence, not failures. Device-specific assumptions remain OBSERVED/NOT_APPLICABLE until hardware proof exists."
+            text = "Boot Diagnostics itself has no product-level development restriction. The entries below describe only what the currently implemented tests do today. Future experimental tests may go beyond these boundaries while they are being developed here.\n\n" +
+                "• Functional matrix: currently read-only USB/Recovery observation.\n" +
+                "• M1 Stage-2 development test: currently uses the proven CPID=8103 path and stops at verified Stage 2.\n" +
+                "• Current cumulative Stage-2 test: currently reaches the proven restore-entry boundary and stops after the first fresh post-Recovery Apple USB enumeration.\n" +
+                "• Future-device and restore-development tests may add new active behavior here first, with their actual prerequisites, mutations, and observed results logged explicitly."
             textSize = 12f
             setPadding(0, 0, 0, dp(14))
         })
@@ -129,14 +130,14 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         recoveryView = section(root, "Observed boot evidence", "No Recovery snapshot yet", 13f, monospace = true)
 
         runButton = Button(this).apply {
-            text = "Run read-only functional test matrix"
+            text = "Run current functional test matrix"
             setOnClickListener { runDiagnostic(requestPermission = true) }
         }
         root.addView(runButton)
 
         testMatrixView = section(
             root,
-            "Read-only functional test matrix",
+            "Functional test matrix",
             "No tests have run yet.",
             13f,
             monospace = true
@@ -145,13 +146,13 @@ class BootDiagnosticsActivity : AppCompatActivity() {
         timelineView = section(root, "Boot-state timeline", "No events yet", 12f, monospace = true)
 
         root.addView(TextView(this).apply {
-            text = "Active hardware development tests"
+            text = "Active development tests"
             textSize = 18f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setPadding(0, dp(20), 0, dp(4))
         })
         root.addView(TextView(this).apply {
-            text = "These controls are intentionally kept in Boot Diagnostics. They are not normal app features until their behavior and device scope are hardware-proven. Buttons stay disabled until all required firmware/TSS/device prerequisites are present."
+            text = "All experimental hardware work belongs here until it is verified. Each control should state what it currently does, what prerequisites it needs, and what evidence it produced; those are test properties, not restrictions on Boot Diagnostics as a development surface."
             textSize = 12f
             setPadding(0, 0, 0, dp(10))
         })
@@ -205,7 +206,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
             setPadding(0, dp(16), 0, dp(8))
         })
         root.addView(TextView(this).apply {
-            text = "Promotion rule: a feature belongs in the main app only after its diagnostic test has a defined scope, repeatable hardware proof, bounded failure behavior, and logs that explain why it is safe to expose as a verified function."
+            text = "Promotion rule: Boot Diagnostics may contain unverified and experimental functionality. A feature belongs in the main app only after its supported scope, repeatable hardware proof, failure behavior, logging, and intended user-facing behavior are established."
             textSize = 12f
         })
         return scroll
@@ -250,7 +251,7 @@ class BootDiagnosticsActivity : AppCompatActivity() {
 
     private fun queueScan(beforeScan: (() -> Unit)? = null) {
         runButton.isEnabled = false
-        stateView.text = "Running read-only functional tests…"
+        stateView.text = "Running functional tests…"
         worker.execute {
             beforeScan?.invoke()
             val snapshot = runCatching { engine.scan() }.getOrElse { error ->
