@@ -1,13 +1,10 @@
 package com.idevicerestore.android
 
 import android.content.Context
-import android.content.ContextWrapper
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.SystemClock
 import android.util.AttributeSet
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,9 +40,8 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
         contentDescription = "Diagnostics only: boot Stage 2 Recovery"
         isEnabled = false
         setOnClickListener {
-            val activity = activity()
-            if (activity != null) {
-                log(
+            AndroidUiBridge.activity(context)?.let { activity ->
+                AndroidUiBridge.log(
                     activity,
                     "Stage-2 diagnostic only: this action is not a prerequisite for Run Current Stage-2 Test; cumulative tests automate DFU through the current boundary"
                 )
@@ -71,7 +67,7 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
         if (!repairInFlight.compareAndSet(false, true)) return
         repairWorker.execute {
             try {
-                val activity = activity() ?: return@execute
+                val activity = AndroidUiBridge.activity(context) ?: return@execute
                 val usb = activity.getSystemService(Context.USB_SERVICE) as UsbManager
                 val deadline = SystemClock.elapsedRealtime() + REPAIR_WINDOW_MS
                 var lastFailure: Throwable? = null
@@ -102,14 +98,20 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
 
                         val autoBoot = command.getenv("auto-boot").value.trim()
                         if (autoBoot.equals("true", ignoreCase = true)) {
-                            log(activity, "Boot Stage 2 Recovery: auto-boot normalization not needed; boot-stage=2 auto-boot=true")
+                            AndroidUiBridge.log(
+                                activity,
+                                "Boot Stage 2 Recovery: auto-boot normalization not needed; boot-stage=2 auto-boot=true"
+                            )
                             return@execute
                         }
                         require(autoBoot.equals("false", ignoreCase = true)) {
                             "Unexpected auto-boot value at Stage-2: '$autoBoot'"
                         }
 
-                        log(activity, "Boot Stage 2 Recovery: stale auto-boot=false detected; repairing persistent environment before current test")
+                        AndroidUiBridge.log(
+                            activity,
+                            "Boot Stage 2 Recovery: stale auto-boot=false detected; repairing persistent environment before current test"
+                        )
                         val setBytes = command.sendCommand("setenv auto-boot true")
                         val saveBytes = command.sendCommand("saveenv")
                         val verifiedStage = command.getenv("boot-stage").value.trim()
@@ -120,7 +122,7 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
                         require(verifiedAutoBoot.equals("true", ignoreCase = true)) {
                             "auto-boot repair verification failed: '$verifiedAutoBoot'"
                         }
-                        log(
+                        AndroidUiBridge.log(
                             activity,
                             "Boot Stage 2 Recovery: stale auto-boot repair COMPLETE setenvBytes=$setBytes saveenvBytes=$saveBytes boot-stage=2 auto-boot=true"
                         )
@@ -135,7 +137,10 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
                 }
 
                 lastFailure?.let {
-                    log(activity, "Boot Stage 2 Recovery: auto-boot normalization did not complete: ${it.javaClass.simpleName}: ${it.message}")
+                    AndroidUiBridge.log(
+                        activity,
+                        "Boot Stage 2 Recovery: auto-boot normalization did not complete: ${it.javaClass.simpleName}: ${it.message}"
+                    )
                 }
             } finally {
                 repairInFlight.set(false)
@@ -148,25 +153,6 @@ class BootStage2RecoveryButton @JvmOverloads constructor(
             AppleUsb.mode(device) == AppleUsb.Mode.RECOVERY &&
             usb.hasPermission(device) &&
             AppleUsb.bootIdentifiers(device)?.cpidHex.equals(M1_CPID, ignoreCase = true)
-    }
-
-    private fun activity(): AppCompatActivity? {
-        var current: Context? = context
-        while (current is ContextWrapper) {
-            if (current is AppCompatActivity) return current
-            current = current.baseContext
-        }
-        return current as? AppCompatActivity
-    }
-
-    private fun log(activity: AppCompatActivity, message: String) = activity.runOnUiThread {
-        val delivered = runCatching {
-            val method = activity.javaClass.getDeclaredMethod("log", String::class.java)
-            method.isAccessible = true
-            method.invoke(activity, message)
-            true
-        }.getOrDefault(false)
-        if (!delivered) activity.findViewById<TextView?>(R.id.logView)?.append(message.trimEnd() + "\n")
     }
 
     companion object {
