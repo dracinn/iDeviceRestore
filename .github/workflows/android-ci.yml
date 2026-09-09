@@ -26,14 +26,11 @@ jobs:
             echo "android=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           git fetch origin "${{ github.base_ref }}" --no-tags --depth=1
           if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- android/ .github/workflows/android-ci.yml .github/workflows/android-release.yml; then
             echo "android=false" >> "$GITHUB_OUTPUT"
-            echo "No Android-impacting changes detected; build steps will be skipped."
           else
             echo "android=true" >> "$GITHUB_OUTPUT"
-            echo "Android-impacting changes detected; running the debug APK build."
           fi
 
       - name: Set up Node.js 24 LTS
@@ -55,19 +52,11 @@ jobs:
         with:
           gradle-version: '8.14.5'
 
-      - name: Verify toolchains
-        if: steps.changes.outputs.android == 'true'
-        run: |
-          node --version
-          npm --version
-          java -version
-          gradle --version
-
-      - name: Build debug APK
+      - name: Build four complete design iterations
         if: steps.changes.outputs.android == 'true'
         run: gradle -p android --no-daemon --stacktrace assembleDebug
 
-      - name: Verify user-facing version metadata
+      - name: Verify full-app APK variants
         if: steps.changes.outputs.android == 'true'
         shell: bash
         run: |
@@ -76,44 +65,89 @@ jobs:
           import re
           from pathlib import Path
 
-          properties = Path("android/gradle.properties").read_text().splitlines()
-          values = {}
-          for line in properties:
-              if "=" in line and not line.lstrip().startswith("#"):
-                  key, value = line.split("=", 1)
-                  values[key.strip()] = value.strip()
-
-          expected_name = values.get("ideviceRestoreVersionName", "")
-          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", expected_name)
-          if not match:
-              raise SystemExit(f"Invalid ideviceRestoreVersionName: {expected_name!r}")
-          major, minor, patch = map(int, match.groups())
+          props = {}
+          for line in Path('android/gradle.properties').read_text().splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k, v = line.split('=', 1)
+                  props[k.strip()] = v.strip()
+          base_version = props['ideviceRestoreVersionName']
+          m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', base_version)
+          if not m:
+              raise SystemExit(f'Invalid semantic version {base_version!r}')
+          major, minor, patch = map(int, m.groups())
           expected_code = major * 1_000_000 + minor * 1_000 + patch
-
-          metadata_path = Path("android/app/build/outputs/apk/debug/output-metadata.json")
-          metadata = json.loads(metadata_path.read_text())
-          elements = metadata.get("elements") or []
-          if len(elements) != 1:
-              raise SystemExit(f"Expected one debug APK metadata element, found {len(elements)}")
-          element = elements[0]
-          actual_name = str(element.get("versionName", "")).strip()
-          actual_code = int(element.get("versionCode", -1))
-          if actual_name != expected_name:
-              raise SystemExit(f"versionName mismatch: expected {expected_name}, got {actual_name}")
-          if actual_code != expected_code:
-              raise SystemExit(f"versionCode mismatch: expected {expected_code}, got {actual_code}")
-          print(f"Verified user-facing version {actual_name} (versionCode {actual_code})")
+          expected_flavors = {'reference', 'compact', 'comfort', 'minimal'}
+          found = {}
+          for metadata_path in Path('android/app/build/outputs/apk').glob('*/debug/output-metadata.json'):
+              flavor = metadata_path.parent.parent.name
+              data = json.loads(metadata_path.read_text())
+              elements = data.get('elements') or []
+              if len(elements) != 1:
+                  raise SystemExit(f'{metadata_path}: expected one APK element')
+              element = elements[0]
+              found[flavor] = {
+                  'applicationId': data.get('applicationId'),
+                  'versionName': str(element.get('versionName', '')),
+                  'versionCode': int(element.get('versionCode', -1)),
+                  'apk': str(metadata_path.parent / element.get('outputFile', '')),
+              }
+          if set(found) != expected_flavors:
+              raise SystemExit(f'Expected flavors {sorted(expected_flavors)}, found {sorted(found)}')
+          for flavor in sorted(expected_flavors):
+              item = found[flavor]
+              if item['applicationId'] != 'com.idevicerestore.android':
+                  raise SystemExit(f'{flavor}: package mismatch {item["applicationId"]!r}')
+              expected_name = base_version if flavor == 'reference' else f'{base_version}-{flavor}'
+              if item['versionName'] != expected_name:
+                  raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}; expected {expected_name!r}')
+              if item['versionCode'] != expected_code:
+                  raise SystemExit(f'{flavor}: versionCode mismatch {item["versionCode"]}')
+              if not Path(item['apk']).is_file():
+                  raise SystemExit(f'{flavor}: missing APK {item["apk"]}')
+              print(f'{flavor}: {item["applicationId"]} {item["versionName"]} -> {item["apk"]}')
           PY
 
-      - name: Upload debug APK
+      - name: Build reference release compatibility APK
+        if: steps.changes.outputs.android == 'true'
+        run: gradle -p android --no-daemon --stacktrace assembleReferenceRelease
+
+      - name: Verify reference release compatibility
+        if: steps.changes.outputs.android == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          props = {}
+          for line in Path('android/gradle.properties').read_text().splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k, v = line.split('=', 1)
+                  props[k.strip()] = v.strip()
+          expected = props['ideviceRestoreVersionName']
+          metadata_path = Path('android/app/build/outputs/apk/reference/release/output-metadata.json')
+          data = json.loads(metadata_path.read_text())
+          elements = data.get('elements') or []
+          if len(elements) != 1:
+              raise SystemExit(f'Expected one reference release APK element, found {len(elements)}')
+          element = elements[0]
+          if str(element.get('versionName', '')).strip() != expected:
+              raise SystemExit(f'Reference release version mismatch: expected {expected!r}, got {element.get("versionName")!r}')
+          apk = metadata_path.parent / element.get('outputFile', '')
+          if not apk.is_file():
+              raise SystemExit(f'Missing reference release APK: {apk}')
+          print(f'Reference release compatible: {apk}')
+          PY
+
+      - name: Upload four full-app design APKs
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: iDeviceRestore-four-full-app-designs
+          path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
       - name: Documentation-only PR
         if: steps.changes.outputs.android != 'true'
-        run: echo "No Android-impacting changes; build-debug-apk passes without building the APK."
+        run: echo "No Android-impacting changes; build passes without compiling APKs."

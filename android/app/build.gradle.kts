@@ -98,6 +98,33 @@ android {
         }
     }
 
+    flavorDimensions += "design"
+    productFlavors {
+        create("reference") {
+            dimension = "design"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Reference"
+            buildConfigField("String", "DESIGN_ITERATION", "\"reference\"")
+        }
+        create("compact") {
+            dimension = "design"
+            versionNameSuffix = "-compact"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Compact"
+            buildConfigField("String", "DESIGN_ITERATION", "\"compact\"")
+        }
+        create("comfort") {
+            dimension = "design"
+            versionNameSuffix = "-comfort"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Comfort"
+            buildConfigField("String", "DESIGN_ITERATION", "\"comfort\"")
+        }
+        create("minimal") {
+            dimension = "design"
+            versionNameSuffix = "-minimal"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Minimal"
+            buildConfigField("String", "DESIGN_ITERATION", "\"minimal\"")
+        }
+    }
+
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/aria2c/jniLibs"))
 
     packaging {
@@ -124,6 +151,7 @@ android {
 
     buildTypes {
         getByName("release") {
+            manifestPlaceholders["appLabel"] = "iDeviceRestore"
             if (!releaseKeystorePath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }

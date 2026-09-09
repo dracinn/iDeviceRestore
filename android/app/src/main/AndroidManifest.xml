@@ -7,29 +7,31 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
     <application
         android:name=".IDeviceRestoreApplication"
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="iDeviceRestore"
+        android:label="${appLabel}"
         android:theme="@style/Theme.IDeviceRestore">
         <service
             android:name=".FirmwareDownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
         <activity android:name=".LogsActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity
             android:name=".BootDiagnosticsActivity"
             android:exported="false"
-            android:label="iDeviceRestore Boot Diagnostics"
+            android:label="${appLabel} Boot Diagnostics"
             android:taskAffinity="${applicationId}.bootdiagnostics" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="iDeviceRestore">
+            android:label="${appLabel}">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
