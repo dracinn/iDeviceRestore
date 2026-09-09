@@ -30,6 +30,10 @@ class AppSettings(context: Context) {
         get() = preferences.getBoolean(KEY_ORGANIZE_FIRMWARE_BY_DEVICE, true)
         set(value) = preferences.edit().putBoolean(KEY_ORGANIZE_FIRMWARE_BY_DEVICE, value).apply()
 
+    var aria2Connections: Int
+        get() = preferences.getInt(KEY_ARIA2_CONNECTIONS, DEFAULT_ARIA2_CONNECTIONS).coerceIn(1, 16)
+        set(value) = preferences.edit().putInt(KEY_ARIA2_CONNECTIONS, value.coerceIn(1, 16)).apply()
+
     var appearanceMode: AppearanceMode
         get() = AppearanceMode.fromStoredValue(preferences.getString(KEY_APPEARANCE_MODE, null))
         set(value) = preferences.edit().putString(KEY_APPEARANCE_MODE, value.storedValue).apply()
@@ -57,6 +61,10 @@ class AppSettings(context: Context) {
                 editor.putBoolean(KEY_ORGANIZE_FIRMWARE_BY_DEVICE, true)
             }
         }
+        if (current < 2 && !preferences.contains(KEY_ARIA2_CONNECTIONS)) {
+            // Existing production builds used eight aria2 connections.
+            editor.putInt(KEY_ARIA2_CONNECTIONS, DEFAULT_ARIA2_CONNECTIONS)
+        }
         editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
     }
 
@@ -72,13 +80,15 @@ class AppSettings(context: Context) {
     }
 
     companion object {
-        private const val CURRENT_SCHEMA_VERSION = 1
+        const val DEFAULT_ARIA2_CONNECTIONS = 8
+        private const val CURRENT_SCHEMA_VERSION = 2
         private const val KEY_SCHEMA_VERSION = "settings_schema_version"
         private const val KEY_AUTOMATIC_DEVICE_DETECTION = "automatic_device_detection"
         private const val KEY_CHECK_FOR_APP_UPDATES = "check_for_app_updates_at_launch"
         private const val KEY_VERBOSE_LOGGING = "verbose_logging"
         private const val KEY_INCLUDE_BETA_FIRMWARE = "include_beta_firmware"
         private const val KEY_ORGANIZE_FIRMWARE_BY_DEVICE = "organize_firmware_by_device"
+        private const val KEY_ARIA2_CONNECTIONS = "aria2_connections"
         private const val KEY_APPEARANCE_MODE = "appearance_mode"
     }
 }
