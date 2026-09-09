@@ -52,11 +52,11 @@ jobs:
         with:
           gradle-version: '8.14.5'
 
-      - name: Build four complete design iterations
+      - name: Build current reference design
         if: steps.changes.outputs.android == 'true'
-        run: gradle -p android --no-daemon --stacktrace assembleDebug
+        run: gradle -p android --no-daemon --stacktrace assembleReferenceDebug
 
-      - name: Verify full-app APK variants
+      - name: Verify reference debug APK
         if: steps.changes.outputs.android == 'true'
         shell: bash
         run: |
@@ -76,35 +76,23 @@ jobs:
               raise SystemExit(f'Invalid semantic version {base_version!r}')
           major, minor, patch = map(int, m.groups())
           expected_code = major * 1_000_000 + minor * 1_000 + patch
-          expected_flavors = {'reference', 'compact', 'comfort', 'minimal'}
-          found = {}
-          for metadata_path in Path('android/app/build/outputs/apk').glob('*/debug/output-metadata.json'):
-              flavor = metadata_path.parent.parent.name
-              data = json.loads(metadata_path.read_text())
-              elements = data.get('elements') or []
-              if len(elements) != 1:
-                  raise SystemExit(f'{metadata_path}: expected one APK element')
-              element = elements[0]
-              found[flavor] = {
-                  'applicationId': data.get('applicationId'),
-                  'versionName': str(element.get('versionName', '')),
-                  'versionCode': int(element.get('versionCode', -1)),
-                  'apk': str(metadata_path.parent / element.get('outputFile', '')),
-              }
-          if set(found) != expected_flavors:
-              raise SystemExit(f'Expected flavors {sorted(expected_flavors)}, found {sorted(found)}')
-          for flavor in sorted(expected_flavors):
-              item = found[flavor]
-              if item['applicationId'] != 'com.idevicerestore.android':
-                  raise SystemExit(f'{flavor}: package mismatch {item["applicationId"]!r}')
-              expected_name = base_version if flavor == 'reference' else f'{base_version}-{flavor}'
-              if item['versionName'] != expected_name:
-                  raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}; expected {expected_name!r}')
-              if item['versionCode'] != expected_code:
-                  raise SystemExit(f'{flavor}: versionCode mismatch {item["versionCode"]}')
-              if not Path(item['apk']).is_file():
-                  raise SystemExit(f'{flavor}: missing APK {item["apk"]}')
-              print(f'{flavor}: {item["applicationId"]} {item["versionName"]} -> {item["apk"]}')
+
+          metadata_path = Path('android/app/build/outputs/apk/reference/debug/output-metadata.json')
+          data = json.loads(metadata_path.read_text())
+          elements = data.get('elements') or []
+          if len(elements) != 1:
+              raise SystemExit(f'{metadata_path}: expected one APK element')
+          element = elements[0]
+          if data.get('applicationId') != 'com.idevicerestore.android':
+              raise SystemExit(f'Package mismatch {data.get("applicationId")!r}')
+          if str(element.get('versionName', '')) != base_version:
+              raise SystemExit(f'Version mismatch {element.get("versionName")!r}; expected {base_version!r}')
+          if int(element.get('versionCode', -1)) != expected_code:
+              raise SystemExit(f'Version code mismatch {element.get("versionCode")}')
+          apk = metadata_path.parent / element.get('outputFile', '')
+          if not apk.is_file():
+              raise SystemExit(f'Missing APK {apk}')
+          print(f'reference: {data.get("applicationId")} {base_version} -> {apk}')
           PY
 
       - name: Build reference release compatibility APK
@@ -139,12 +127,12 @@ jobs:
           print(f'Reference release compatible: {apk}')
           PY
 
-      - name: Upload four full-app design APKs
+      - name: Upload reference debug APK
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-four-full-app-designs
-          path: android/app/build/outputs/apk/*/debug/*.apk
+          name: iDeviceRestore-reference-debug
+          path: android/app/build/outputs/apk/reference/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
