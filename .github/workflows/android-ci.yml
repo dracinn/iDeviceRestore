@@ -10,7 +10,7 @@ permissions:
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -106,11 +106,49 @@ jobs:
               print(f'{flavor}: {item["applicationId"]} {item["versionName"]} -> {item["apk"]}')
           PY
 
+      - name: Enable KVM access
+        if: steps.changes.outputs.android == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Smoke-test all four APKs on Android 14
+        if: steps.changes.outputs.android == 'true'
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            for flavor in reference compact comfort minimal; do
+              apk="android/app/build/outputs/apk/${flavor}/debug/app-${flavor}-debug.apk"
+              echo "Testing $flavor -> $apk"
+              adb install -r "$apk"
+              adb logcat -c
+              adb shell am force-stop com.idevicerestore.android
+              adb shell am start -W -n com.idevicerestore.android/.MainActivity
+              sleep 5
+              if ! adb shell pidof com.idevicerestore.android >/dev/null; then
+                echo "Startup failure for $flavor"
+                adb logcat -d -t 300
+                exit 1
+              fi
+              if adb logcat -d -t 300 | grep -q "FATAL EXCEPTION: main"; then
+                echo "Main-thread crash detected for $flavor"
+                adb logcat -d -t 300
+                exit 1
+              fi
+              adb shell am force-stop com.idevicerestore.android
+            done
+
       - name: Upload four full-app design APKs
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-four-full-app-designs-stable-package
+          name: iDeviceRestore-four-full-app-designs-smoke-tested
           path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14
