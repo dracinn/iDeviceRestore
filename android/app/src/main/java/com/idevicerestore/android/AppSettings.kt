@@ -34,6 +34,15 @@ class AppSettings(context: Context) {
         get() = preferences.getInt(KEY_ARIA2_CONNECTIONS, DEFAULT_ARIA2_CONNECTIONS).coerceIn(1, 16)
         set(value) = preferences.edit().putInt(KEY_ARIA2_CONNECTIONS, value.coerceIn(1, 16)).apply()
 
+    var projectFolderName: String
+        get() = sanitizeProjectFolderName(
+            preferences.getString(KEY_PROJECT_FOLDER_NAME, DEFAULT_PROJECT_FOLDER_NAME)
+                ?: DEFAULT_PROJECT_FOLDER_NAME
+        )
+        set(value) = preferences.edit()
+            .putString(KEY_PROJECT_FOLDER_NAME, sanitizeProjectFolderName(value))
+            .apply()
+
     var appearanceMode: AppearanceMode
         get() = AppearanceMode.fromStoredValue(preferences.getString(KEY_APPEARANCE_MODE, null))
         set(value) = preferences.edit().putString(KEY_APPEARANCE_MODE, value.storedValue).apply()
@@ -65,6 +74,10 @@ class AppSettings(context: Context) {
             // Existing production builds used eight aria2 connections.
             editor.putInt(KEY_ARIA2_CONNECTIONS, DEFAULT_ARIA2_CONNECTIONS)
         }
+        if (current < 3 && !preferences.contains(KEY_PROJECT_FOLDER_NAME)) {
+            // Existing installs always used /storage/emulated/0/iDeviceRestore.
+            editor.putString(KEY_PROJECT_FOLDER_NAME, DEFAULT_PROJECT_FOLDER_NAME)
+        }
         editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
     }
 
@@ -81,7 +94,8 @@ class AppSettings(context: Context) {
 
     companion object {
         const val DEFAULT_ARIA2_CONNECTIONS = 8
-        private const val CURRENT_SCHEMA_VERSION = 2
+        const val DEFAULT_PROJECT_FOLDER_NAME = "iDeviceRestore"
+        private const val CURRENT_SCHEMA_VERSION = 3
         private const val KEY_SCHEMA_VERSION = "settings_schema_version"
         private const val KEY_AUTOMATIC_DEVICE_DETECTION = "automatic_device_detection"
         private const val KEY_CHECK_FOR_APP_UPDATES = "check_for_app_updates_at_launch"
@@ -89,6 +103,15 @@ class AppSettings(context: Context) {
         private const val KEY_INCLUDE_BETA_FIRMWARE = "include_beta_firmware"
         private const val KEY_ORGANIZE_FIRMWARE_BY_DEVICE = "organize_firmware_by_device"
         private const val KEY_ARIA2_CONNECTIONS = "aria2_connections"
+        private const val KEY_PROJECT_FOLDER_NAME = "project_folder_name"
         private const val KEY_APPEARANCE_MODE = "appearance_mode"
+
+        fun sanitizeProjectFolderName(value: String): String {
+            val cleaned = value.trim()
+                .replace(Regex("[^A-Za-z0-9._ -]+"), "_")
+                .trim(' ', '.', '_')
+                .take(80)
+            return cleaned.ifBlank { DEFAULT_PROJECT_FOLDER_NAME }
+        }
     }
 }
