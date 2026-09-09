@@ -97,8 +97,9 @@ jobs:
               item = found[flavor]
               if item['applicationId'] != 'com.idevicerestore.android':
                   raise SystemExit(f'{flavor}: package mismatch {item["applicationId"]!r}')
-              if item['versionName'] != f'{base_version}-{flavor}':
-                  raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}')
+              expected_name = base_version if flavor == 'reference' else f'{base_version}-{flavor}'
+              if item['versionName'] != expected_name:
+                  raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}; expected {expected_name!r}')
               if item['versionCode'] != expected_code:
                   raise SystemExit(f'{flavor}: versionCode mismatch {item["versionCode"]}')
               if not Path(item['apk']).is_file():
