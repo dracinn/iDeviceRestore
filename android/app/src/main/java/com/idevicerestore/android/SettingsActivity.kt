@@ -33,7 +33,7 @@ class SettingsActivity : AppCompatActivity() {
         updateAria2ConnectionValue()
 
         // The reference layout predates a stable row id. Resolve the containing row from the
-        // bound path label so existing installs/layouts gain a functional directory control without
+        // bound path label so existing layouts gain a functional directory control without
         // introducing another visual-only setting.
         val downloadDirectoryRow = binding.downloadDirectoryText.parent?.parent as? View
         downloadDirectoryRow?.apply {
@@ -126,7 +126,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Default Download Directory")
-            .setMessage("Choose the top-level folder name on primary shared storage. Existing iDeviceRestore data will be moved by rename when possible.")
+            .setMessage("Choose a top-level folder on primary shared storage. Existing iDeviceRestore data is moved with a same-volume rename; non-empty destinations are refused rather than merged.")
             .setView(input)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Move", null)
