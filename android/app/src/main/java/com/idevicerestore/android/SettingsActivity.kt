@@ -80,8 +80,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun shareSettingsReport() {
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
+        val session = SessionLogSnapshotStore.snapshot()
         val report = buildString {
-            appendLine("iDeviceRestore diagnostic summary")
+            appendLine("iDeviceRestore diagnostic log")
             appendLine("Generated: $timestamp")
             appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
@@ -98,6 +99,15 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Privacy: ECID and Apple serial number are redacted from shared reports")
             appendLine("---")
             appendLine(RestorePreflightEvidenceStore.preflightSummary())
+            appendLine("---")
+            appendLine("=== Activity Log ===")
+            if (session.activityLog.isBlank()) appendLine("No activity log entries captured in this process.")
+            else append(session.activityLog).also {
+                if (!session.activityLog.endsWith('\n')) appendLine()
+            }
+            appendLine("=== Probe Log ===")
+            if (session.probeLog.isBlank()) appendLine("No USB probe log entries captured in this process.")
+            else append(session.probeLog)
         }
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
