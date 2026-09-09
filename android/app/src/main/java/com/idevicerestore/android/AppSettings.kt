@@ -6,6 +6,10 @@ import androidx.appcompat.app.AppCompatDelegate
 class AppSettings(context: Context) {
     private val preferences = context.getSharedPreferences("idevicerestore_settings", Context.MODE_PRIVATE)
 
+    init {
+        migrateIfNeeded()
+    }
+
     var automaticDeviceDetection: Boolean
         get() = preferences.getBoolean(KEY_AUTOMATIC_DEVICE_DETECTION, true)
         set(value) = preferences.edit().putBoolean(KEY_AUTOMATIC_DEVICE_DETECTION, value).apply()
@@ -30,6 +34,32 @@ class AppSettings(context: Context) {
         get() = AppearanceMode.fromStoredValue(preferences.getString(KEY_APPEARANCE_MODE, null))
         set(value) = preferences.edit().putString(KEY_APPEARANCE_MODE, value.storedValue).apply()
 
+    val schemaVersion: Int
+        get() = preferences.getInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
+
+    private fun migrateIfNeeded() {
+        val current = preferences.getInt(KEY_SCHEMA_VERSION, 0)
+        if (current >= CURRENT_SCHEMA_VERSION) return
+
+        val editor = preferences.edit()
+        if (current < 1) {
+            // Preserve the behavior users had before these switches became configurable.
+            if (!preferences.contains(KEY_AUTOMATIC_DEVICE_DETECTION)) {
+                editor.putBoolean(KEY_AUTOMATIC_DEVICE_DETECTION, true)
+            }
+            if (!preferences.contains(KEY_CHECK_FOR_APP_UPDATES)) {
+                editor.putBoolean(KEY_CHECK_FOR_APP_UPDATES, true)
+            }
+            if (!preferences.contains(KEY_VERBOSE_LOGGING)) {
+                editor.putBoolean(KEY_VERBOSE_LOGGING, false)
+            }
+            if (!preferences.contains(KEY_ORGANIZE_FIRMWARE_BY_DEVICE)) {
+                editor.putBoolean(KEY_ORGANIZE_FIRMWARE_BY_DEVICE, true)
+            }
+        }
+        editor.putInt(KEY_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION).apply()
+    }
+
     enum class AppearanceMode(val storedValue: String, val appCompatNightMode: Int) {
         SYSTEM("system", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM),
         LIGHT("light", AppCompatDelegate.MODE_NIGHT_NO),
@@ -42,6 +72,8 @@ class AppSettings(context: Context) {
     }
 
     companion object {
+        private const val CURRENT_SCHEMA_VERSION = 1
+        private const val KEY_SCHEMA_VERSION = "settings_schema_version"
         private const val KEY_AUTOMATIC_DEVICE_DETECTION = "automatic_device_detection"
         private const val KEY_CHECK_FOR_APP_UPDATES = "check_for_app_updates_at_launch"
         private const val KEY_VERBOSE_LOGGING = "verbose_logging"
