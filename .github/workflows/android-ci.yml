@@ -8,112 +8,34 @@ permissions:
   contents: read
 
 jobs:
-  build-debug-apk:
+  build-preview-apks:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Detect Android-impacting changes
-        id: changes
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            echo "android=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git fetch origin "${{ github.base_ref }}" --no-tags --depth=1
-          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- android/ .github/workflows/android-ci.yml .github/workflows/android-release.yml; then
-            echo "android=false" >> "$GITHUB_OUTPUT"
-            echo "No Android-impacting changes detected; build steps will be skipped."
-          else
-            echo "android=true" >> "$GITHUB_OUTPUT"
-            echo "Android-impacting changes detected; running the debug APK build."
-          fi
-
       - name: Set up Node.js 24 LTS
-        if: steps.changes.outputs.android == 'true'
         uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
+        with: { node-version: '24' }
       - name: Set up JDK 21
-        if: steps.changes.outputs.android == 'true'
         uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
-
+        with: { distribution: temurin, java-version: '21' }
       - name: Set up Gradle 8.14.5
-        if: steps.changes.outputs.android == 'true'
         uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '8.14.5'
-
-      - name: Verify toolchains
-        if: steps.changes.outputs.android == 'true'
-        run: |
-          node --version
-          npm --version
-          java -version
-          gradle --version
-
-      - name: Build debug APK
-        if: steps.changes.outputs.android == 'true'
-        run: gradle -p android --no-daemon --stacktrace assembleDebug
-
-      - name: Verify user-facing version metadata
-        if: steps.changes.outputs.android == 'true'
+        with: { gradle-version: '8.14.5' }
+      - name: Build four asset-driven preview APKs
+        run: gradle -p android --no-daemon --stacktrace assembleHomeDebug assembleFirmwareDebug assembleRestoreDebug assembleDiagnosticsDebug
+      - name: Verify four preview APKs
         shell: bash
         run: |
-          python3 - <<'PY'
-          import json
-          import re
-          from pathlib import Path
-
-          properties = Path("android/gradle.properties").read_text().splitlines()
-          values = {}
-          for line in properties:
-              if "=" in line and not line.lstrip().startswith("#"):
-                  key, value = line.split("=", 1)
-                  values[key.strip()] = value.strip()
-
-          expected_name = values.get("ideviceRestoreVersionName", "")
-          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", expected_name)
-          if not match:
-              raise SystemExit(f"Invalid ideviceRestoreVersionName: {expected_name!r}")
-          major, minor, patch = map(int, match.groups())
-          expected_code = major * 1_000_000 + minor * 1_000 + patch
-
-          metadata_path = Path("android/app/build/outputs/apk/debug/output-metadata.json")
-          metadata = json.loads(metadata_path.read_text())
-          elements = metadata.get("elements") or []
-          if len(elements) != 1:
-              raise SystemExit(f"Expected one debug APK metadata element, found {len(elements)}")
-          element = elements[0]
-          actual_name = str(element.get("versionName", "")).strip()
-          actual_code = int(element.get("versionCode", -1))
-          if actual_name != expected_name:
-              raise SystemExit(f"versionName mismatch: expected {expected_name}, got {actual_name}")
-          if actual_code != expected_code:
-              raise SystemExit(f"versionCode mismatch: expected {expected_code}, got {actual_code}")
-          print(f"Verified user-facing version {actual_name} (versionCode {actual_code})")
-          PY
-
-      - name: Upload debug APK
-        if: steps.changes.outputs.android == 'true'
+          set -euo pipefail
+          mapfile -t apks < <(find android/app/build/outputs/apk -path '*/debug/*.apk' -type f | sort)
+          printf '%s\n' "${apks[@]}"
+          [[ ${#apks[@]} -eq 4 ]]
+      - name: Upload preview APKs
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: iDeviceRestore-android-four-previews
+          path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14
-
-      - name: Documentation-only PR
-        if: steps.changes.outputs.android != 'true'
-        run: echo "No Android-impacting changes; build-debug-apk passes without building the APK."

@@ -8,22 +8,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersionName = providers.gradleProperty("ideviceRestoreVersionName").orNull
-    ?.trim()
-    ?.takeIf { it.isNotEmpty() }
+val appVersionName = providers.gradleProperty("ideviceRestoreVersionName").orNull?.trim()?.takeIf { it.isNotEmpty() }
     ?: error("ideviceRestoreVersionName must be set in android/gradle.properties")
 val semanticVersion = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)$").matchEntire(appVersionName)
     ?: error("ideviceRestoreVersionName must use x.y.z semantic versioning: $appVersionName")
 val versionMajor = semanticVersion.groupValues[1].toInt()
 val versionMinor = semanticVersion.groupValues[2].toInt()
 val versionPatch = semanticVersion.groupValues[3].toInt()
-check(versionMinor in 0..999 && versionPatch in 0..999) {
-    "Semantic version minor/patch components must be between 0 and 999: $appVersionName"
-}
+check(versionMinor in 0..999 && versionPatch in 0..999)
 val appVersionCodeLong = versionMajor.toLong() * 1_000_000L + versionMinor.toLong() * 1_000L + versionPatch
-check(appVersionCodeLong in 1..2_100_000_000L) {
-    "Derived Android versionCode is outside the supported range: $appVersionCodeLong"
-}
+check(appVersionCodeLong in 1..2_100_000_000L)
 val appVersionCode = appVersionCodeLong.toInt()
 val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 
@@ -37,11 +31,7 @@ fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")
     inputStream().buffered().use { input ->
         val buffer = ByteArray(128 * 1024)
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            digest.update(buffer, 0, count)
-        }
+        while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
     }
     return digest.digest().joinToString("") { "%02x".format(it) }
 }
@@ -53,99 +43,63 @@ val prepareAria2c by tasks.registering {
     doLast {
         val output = generatedAria2Lib.get().asFile
         if (output.isFile && output.sha256() == aria2ExecutableSha256) return@doLast
-        output.delete()
-        output.parentFile.mkdirs()
-        val temp = output.resolveSibling(output.name + ".tmp")
-        temp.delete()
+        output.delete(); output.parentFile.mkdirs()
+        val temp = output.resolveSibling(output.name + ".tmp"); temp.delete()
         URI(aria2ReleaseUrl).toURL().openStream().use { raw ->
             ZipInputStream(raw.buffered()).use { zip ->
                 var found = false
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     if (!entry.isDirectory && entry.name == "$aria2ReleaseName/aria2c") {
-                        temp.outputStream().buffered().use { out -> zip.copyTo(out) }
-                        found = true
-                        break
+                        temp.outputStream().buffered().use { out -> zip.copyTo(out) }; found = true; break
                     }
                     zip.closeEntry()
                 }
-                check(found && temp.isFile && temp.length() > 0L) {
-                    "Official aria2c executable was not found in $aria2ReleaseUrl"
-                }
+                check(found && temp.isFile && temp.length() > 0L)
             }
         }
-        val actualSha256 = temp.sha256()
-        check(actualSha256 == aria2ExecutableSha256) {
-            "aria2c SHA-256 mismatch: expected $aria2ExecutableSha256, got $actualSha256"
-        }
-        check(temp.renameTo(output)) { "Could not stage official aria2c executable" }
-        println("Packaged verified official aria2c $aria2Version sha256=$actualSha256")
+        val actualSha256 = temp.sha256(); check(actualSha256 == aria2ExecutableSha256)
+        check(temp.renameTo(output))
     }
 }
 
 android {
     namespace = "com.idevicerestore.android"
     compileSdk = 36
-
     defaultConfig {
         applicationId = "com.idevicerestore.android"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        ndk { abiFilters += "arm64-v8a" }
     }
-
+    flavorDimensions += "preview"
+    productFlavors {
+        create("home") { dimension = "preview"; applicationIdSuffix = ".preview.home"; buildConfigField("String", "PREVIEW_START_SCREEN", "\"home\"") }
+        create("firmware") { dimension = "preview"; applicationIdSuffix = ".preview.firmware"; buildConfigField("String", "PREVIEW_START_SCREEN", "\"firmware\"") }
+        create("restore") { dimension = "preview"; applicationIdSuffix = ".preview.restore"; buildConfigField("String", "PREVIEW_START_SCREEN", "\"restore\"") }
+        create("diagnostics") { dimension = "preview"; applicationIdSuffix = ".preview.diagnostics"; buildConfigField("String", "PREVIEW_START_SCREEN", "\"diagnostics\"") }
+    }
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/aria2c/jniLibs"))
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
+    packaging { jniLibs { useLegacyPackaging = true } }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     signingConfigs {
         create("release") {
             if (!releaseKeystorePath.isNullOrBlank()) {
-                storeFile = file(releaseKeystorePath)
-                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storeFile = file(releaseKeystorePath); storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS"); keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
             }
         }
     }
-
     buildTypes {
-        getByName("release") {
-            if (!releaseKeystorePath.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
-            isMinifyEnabled = false
-        }
+        getByName("release") { if (!releaseKeystorePath.isNullOrBlank()) signingConfig = signingConfigs.getByName("release"); isMinifyEnabled = false }
     }
-
-    buildFeatures {
-        viewBinding = true
-        buildConfig = true
-    }
+    buildFeatures { viewBinding = true; buildConfig = true }
 }
 
-tasks.named("preBuild").configure {
-    dependsOn(prepareAria2c)
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
-}
+tasks.named("preBuild").configure { dependsOn(prepareAria2c) }
+kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
