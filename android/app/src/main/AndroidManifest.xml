@@ -13,6 +13,8 @@
         android:name=".IDeviceRestoreApplication"
         android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:icon="@drawable/ic_app_launcher"
+        android:roundIcon="@drawable/ic_app_launcher"
         android:label="iDeviceRestore"
         android:theme="@style/Theme.IDeviceRestore">
         <service
@@ -36,10 +38,6 @@
             </intent-filter>
         </activity>
 
-        <!--
-          A dedicated alias owns USB auto-launch so the Automatically detect devices preference can
-          enable/disable USB attach handling without disabling the launcher activity itself.
-        -->
         <activity-alias
             android:name=".UsbAttachActivityAlias"
             android:enabled="true"
