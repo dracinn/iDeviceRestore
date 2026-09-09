@@ -22,7 +22,10 @@ class MockupNavigationButton @JvmOverloads constructor(
     private fun route(action: String?) {
         when (action) {
             ACTION_HOME -> showScreen(R.id.screenHome, ACTION_HOME)
-            ACTION_FIRMWARE, ACTION_UPDATE -> showScreen(R.id.screenFirmware, ACTION_FIRMWARE)
+            ACTION_FIRMWARE, ACTION_UPDATE -> {
+                showScreen(R.id.screenFirmware, ACTION_FIRMWARE)
+                ConnectedFirmwareBrowser.render(rootView, context)
+            }
             ACTION_DEVICES -> showScreen(R.id.screenDevices, ACTION_DEVICES)
             ACTION_TOOLS -> showScreen(R.id.screenTools, ACTION_TOOLS)
             ACTION_DIAGNOSTICS, ACTION_BOOT_DIAGNOSTICS -> openBootDiagnostics()
