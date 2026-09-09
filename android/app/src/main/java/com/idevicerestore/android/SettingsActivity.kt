@@ -16,11 +16,15 @@ import java.util.Locale
 class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
     private val appSettings by lazy { AppSettings(this) }
+    private val firmwareStorage by lazy { FirmwareStorage(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        binding.downloadDirectoryText.text = firmwareStorage.projectRoot.absolutePath
+        binding.appVersionText.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
         binding.automaticDeviceDetectionSwitch.isChecked = appSettings.automaticDeviceDetection
         binding.automaticDeviceDetectionSwitch.setOnCheckedChangeListener { _, checked ->
@@ -88,6 +92,7 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Verbose diagnostic logging: ${appSettings.verboseLogging}")
             appendLine("Include beta/RC firmware: ${appSettings.includeBetaFirmware}")
             appendLine("Organize firmware by device: ${appSettings.organizeFirmwareByDevice}")
+            appendLine("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
             appendLine("Firmware downloader: official aria2c, up to 8 connections")
             appendLine("Appearance: ${appSettings.appearanceMode.storedValue}")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared reports")
