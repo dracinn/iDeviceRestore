@@ -1,26 +1,14 @@
 name: Android Release
 
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version override, e.g. 0.1.0.4'
-        required: true
 
 permissions:
   contents: write
 
-# Releases choose pseudo versions one at a time so closely spaced commits cannot
-# race and attempt to publish the same v0.1.0.N tag.
 concurrency:
-  group: android-release-series
+  group: android-release
   cancel-in-progress: false
-
-env:
-  DEVELOPMENT_BASE_VERSION: '0.1.0'
 
 jobs:
   build-sign-release:
@@ -32,6 +20,31 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Require master release
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            echo "Android releases must be dispatched from master; current ref is $GITHUB_REF"
+            exit 1
+          fi
+
+      - name: Resolve user-facing release version
+        shell: bash
+        run: |
+          RELEASE_VERSION="$(sed -nE 's/^ideviceRestoreVersionName=([^[:space:]]+)$/\1/p' android/gradle.properties | tail -n 1)"
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "android/gradle.properties must define ideviceRestoreVersionName as x.y.z"
+            exit 1
+          fi
+
+          if git rev-parse "refs/tags/v${RELEASE_VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${RELEASE_VERSION} already exists. Bump ideviceRestoreVersionName before releasing."
+            exit 1
+          fi
+
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "User-facing app version and release tag: $RELEASE_VERSION"
 
       - name: Set up Node.js 24 LTS
         uses: actions/setup-node@v7
@@ -55,51 +68,6 @@ jobs:
           npm --version
           java -version
           gradle --version
-
-      - name: Resolve release and app versions
-        shell: bash
-        run: |
-          git fetch --tags --force
-
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            BASE_VERSION="$DEVELOPMENT_BASE_VERSION"
-            LAST_BUILD="$({
-              git tag --list "v${BASE_VERSION}.*" \
-                | sed -nE "s/^v${BASE_VERSION//./\\.}\.([0-9]+)$/\\1/p" \
-                | sort -n \
-                | tail -n 1
-            } || true)"
-
-            if [[ -z "$LAST_BUILD" ]]; then
-              NEXT_BUILD=1
-            else
-              NEXT_BUILD=$((LAST_BUILD + 1))
-            fi
-
-            RELEASE_VERSION="${BASE_VERSION}.${NEXT_BUILD}"
-            echo "Commit-triggered release selected: $RELEASE_VERSION"
-          else
-            RELEASE_VERSION="${{ inputs.version }}"
-          fi
-
-          if [[ "$RELEASE_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(\.([0-9]+))?$ ]]; then
-            VERSION_NAME="${BASH_REMATCH[1]}"
-            PSEUDO_BUILD="${BASH_REMATCH[3]:-0}"
-          else
-            echo "Version must be x.y.z or x.y.z.N, for example 0.1.0.4"
-            exit 1
-          fi
-
-          if git rev-parse "refs/tags/v${RELEASE_VERSION}" >/dev/null 2>&1; then
-            echo "Tag v${RELEASE_VERSION} already exists; refusing to overwrite it."
-            exit 1
-          fi
-
-          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
-          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
-          echo "PSEUDO_BUILD=$PSEUDO_BUILD" >> "$GITHUB_ENV"
-          echo "VERSION_CODE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "Release $RELEASE_VERSION -> app versionName $VERSION_NAME, versionCode ${GITHUB_RUN_NUMBER}, source $GITHUB_SHA"
 
       - name: Validate signing secrets
         env:
@@ -128,6 +96,17 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle -p android --no-daemon --stacktrace assembleRelease
+
+      - name: Verify APK version matches release
+        shell: bash
+        run: |
+          OUTPUT="$(gradle -p android --no-daemon :app:properties 2>/dev/null || true)"
+          if [[ "$OUTPUT" == *"versionName: $RELEASE_VERSION"* ]]; then
+            echo "Verified Gradle versionName $RELEASE_VERSION"
+          else
+            echo "Could not verify versionName $RELEASE_VERSION from Gradle properties"
+            exit 1
+          fi
 
       - name: Prepare Obtainium APK asset
         shell: bash
