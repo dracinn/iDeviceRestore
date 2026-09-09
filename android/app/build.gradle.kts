@@ -8,8 +8,23 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val ciVersionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-val ciVersionName = System.getenv("VERSION_NAME") ?: "0.1.0-dev"
+val appVersionName = providers.gradleProperty("ideviceRestoreVersionName").orNull
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?: error("ideviceRestoreVersionName must be set in android/gradle.properties")
+val semanticVersion = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)$").matchEntire(appVersionName)
+    ?: error("ideviceRestoreVersionName must use x.y.z semantic versioning: $appVersionName")
+val versionMajor = semanticVersion.groupValues[1].toInt()
+val versionMinor = semanticVersion.groupValues[2].toInt()
+val versionPatch = semanticVersion.groupValues[3].toInt()
+check(versionMinor in 0..999 && versionPatch in 0..999) {
+    "Semantic version minor/patch components must be between 0 and 999: $appVersionName"
+}
+val appVersionCodeLong = versionMajor.toLong() * 1_000_000L + versionMinor.toLong() * 1_000L + versionPatch
+check(appVersionCodeLong in 1..2_100_000_000L) {
+    "Derived Android versionCode is outside the supported range: $appVersionCodeLong"
+}
+val appVersionCode = appVersionCodeLong.toInt()
 val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 
 val aria2Version = "1.37.0"
@@ -76,8 +91,8 @@ android {
         applicationId = "com.idevicerestore.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = ciVersionCode
-        versionName = ciVersionName
+        versionCode = appVersionCode
+        versionName = appVersionName
         ndk {
             abiFilters += "arm64-v8a"
         }
