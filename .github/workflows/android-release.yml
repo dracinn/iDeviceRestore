@@ -105,12 +105,12 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/idevicerestore-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/idevicerestore-release.jks" >> "$GITHUB_ENV"
 
-      - name: Build signed reference release APK
+      - name: Build signed release APK
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle -p android --no-daemon --stacktrace assembleReferenceRelease
+        run: gradle -p android --no-daemon --stacktrace assembleRelease
 
       - name: Verify APK version matches release
         shell: bash
@@ -120,11 +120,11 @@ jobs:
           import os
           from pathlib import Path
 
-          metadata_path = Path("android/app/build/outputs/apk/reference/release/output-metadata.json")
+          metadata_path = Path("android/app/build/outputs/apk/release/output-metadata.json")
           metadata = json.loads(metadata_path.read_text())
           elements = metadata.get("elements") or []
           if len(elements) != 1:
-              raise SystemExit(f"Expected one reference release APK metadata element, found {len(elements)}")
+              raise SystemExit(f"Expected one release APK metadata element, found {len(elements)}")
           actual = str(elements[0].get("versionName", "")).strip()
           expected = os.environ["RELEASE_VERSION"]
           if actual != expected:
@@ -134,7 +134,7 @@ jobs:
 
       - name: Prepare Obtainium APK asset
         shell: bash
-        run: cp android/app/build/outputs/apk/reference/release/app-reference-release.apk iDeviceRestore.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk iDeviceRestore.apk
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
