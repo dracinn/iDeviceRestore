@@ -100,13 +100,22 @@ jobs:
       - name: Verify APK version matches release
         shell: bash
         run: |
-          OUTPUT="$(gradle -p android --no-daemon :app:properties 2>/dev/null || true)"
-          if [[ "$OUTPUT" == *"versionName: $RELEASE_VERSION"* ]]; then
-            echo "Verified Gradle versionName $RELEASE_VERSION"
-          else
-            echo "Could not verify versionName $RELEASE_VERSION from Gradle properties"
-            exit 1
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          metadata_path = Path("android/app/build/outputs/apk/release/output-metadata.json")
+          metadata = json.loads(metadata_path.read_text())
+          elements = metadata.get("elements") or []
+          if len(elements) != 1:
+              raise SystemExit(f"Expected one release APK metadata element, found {len(elements)}")
+          actual = str(elements[0].get("versionName", "")).strip()
+          expected = os.environ["RELEASE_VERSION"]
+          if actual != expected:
+              raise SystemExit(f"APK versionName mismatch: expected {expected}, got {actual}")
+          print(f"Verified APK user-facing version {actual}")
+          PY
 
       - name: Prepare Obtainium APK asset
         shell: bash
