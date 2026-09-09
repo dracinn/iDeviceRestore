@@ -91,6 +91,10 @@ class FirmwareCatalog(
                 logger("FirmwareCatalog: BLOCKED: $reason")
             }
             DeviceSupportPolicy.requireSupported(device)
+            IDeviceRestoreApplication.contextOrNull()?.let { context ->
+                ConnectedDeviceHistory(context).record(device)
+                logger("FirmwareCatalog: remembered connected device ${device.identifier} for firmware browsing")
+            }
         }
         return device
     }
