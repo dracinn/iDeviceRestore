@@ -122,7 +122,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             for flavor in reference compact comfort minimal; do
               apk="android/app/build/outputs/apk/${flavor}/debug/app-${flavor}-debug.apk"
               echo "Testing $flavor -> $apk"
