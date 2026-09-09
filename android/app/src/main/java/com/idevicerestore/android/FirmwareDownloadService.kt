@@ -30,6 +30,7 @@ class FirmwareDownloadService : Service() {
                 if (active != null) {
                     active.cancel()
                 } else {
+                    downloadActive = false
                     broadcastState(STATE_CANCELLED, message = "Firmware download cancelled")
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -140,6 +141,7 @@ class FirmwareDownloadService : Service() {
             }
         }
         handle = active
+        downloadActive = true
 
         Thread {
             try {
@@ -165,6 +167,7 @@ class FirmwareDownloadService : Service() {
                     broadcastState(STATE_FAILED, message = "${cause.javaClass.simpleName}: ${cause.message}")
                 }
             } finally {
+                downloadActive = false
                 handle = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -240,6 +243,7 @@ class FirmwareDownloadService : Service() {
         .build()
 
     private fun fail(message: String) {
+        downloadActive = false
         broadcastState(STATE_FAILED, message = message)
         stopSelf()
     }
@@ -279,6 +283,7 @@ class FirmwareDownloadService : Service() {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         handle?.cancel()
+        downloadActive = false
         broadcastState(STATE_FAILED, message = "Android foreground data-sync time limit reached; aria2c download can be resumed")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(startId)
@@ -287,6 +292,11 @@ class FirmwareDownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile
+        private var downloadActive = false
+
+        fun isDownloadActive(): Boolean = downloadActive
+
         const val ACTION_START = "com.idevicerestore.android.action.DOWNLOAD_FIRMWARE"
         const val ACTION_CANCEL = "com.idevicerestore.android.action.CANCEL_FIRMWARE_DOWNLOAD"
         const val ACTION_STATE = "com.idevicerestore.android.action.FIRMWARE_DOWNLOAD_STATE"
