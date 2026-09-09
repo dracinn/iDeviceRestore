@@ -1,6 +1,11 @@
 name: Android Release
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - android/gradle.properties
   workflow_dispatch:
 
 permissions:
@@ -25,7 +30,7 @@ jobs:
         shell: bash
         run: |
           if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
-            echo "Android releases must be dispatched from master; current ref is $GITHUB_REF"
+            echo "Android releases must run from master; current ref is $GITHUB_REF"
             exit 1
           fi
 
