@@ -13,7 +13,7 @@
         android:name=".IDeviceRestoreApplication"
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="iDeviceRestore Lab"
+        android:label="iDeviceRestore"
         android:theme="@style/Theme.IDeviceRestore">
         <service
             android:name=".FirmwareDownloadService"
@@ -29,7 +29,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="iDeviceRestore Lab">
+            android:label="iDeviceRestore">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
