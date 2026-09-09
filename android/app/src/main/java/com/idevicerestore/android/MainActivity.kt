@@ -123,11 +123,11 @@ class MainActivity : AppCompatActivity() {
         log("Firmware selection: manual catalog choice required each app session")
         log("Firmware metadata: persistent cache with current-index refresh")
         log("Firmware activation: fresh signing and Apple CDN verification required")
-        log("Automatic pseudo-release pipeline: enabled")
+        log("Release versioning: user-facing semantic version ${BuildConfig.VERSION_NAME}")
         log("Shared diagnostic privacy redaction: enabled")
         log("Beta/RC firmware lookup: ${if (appSettings.includeBetaFirmware) "enabled" else "disabled"}")
         log("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
-        log("Firmware downloads: Apple CDN only; resumable single-stream mode")
+        log("Firmware downloads: Apple CDN only; official aria2c segmented/resumable mode (connections=${appSettings.aria2Connections})")
         ensureSharedStorageAccess(openSettings = true)
         updateFirmwareUi()
         scan()
@@ -845,7 +845,7 @@ class MainActivity : AppCompatActivity() {
         binding.cancelDownloadButton.isEnabled = true
         binding.firmwareStatus.text = "Starting Apple CDN download"
         log("Firmware download requested: ${firmware.version} (${firmware.buildId})")
-        log("Firmware download mode: single-stream resumable (connections=1)")
+        log("Firmware download mode: official aria2c segmented/resumable (connections=${appSettings.aria2Connections})")
         ContextCompat.startForegroundService(this, intent)
     }
 

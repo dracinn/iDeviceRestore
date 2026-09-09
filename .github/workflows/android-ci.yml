@@ -67,6 +67,44 @@ jobs:
         if: steps.changes.outputs.android == 'true'
         run: gradle -p android --no-daemon --stacktrace assembleDebug
 
+      - name: Verify user-facing version metadata
+        if: steps.changes.outputs.android == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          properties = Path("android/gradle.properties").read_text().splitlines()
+          values = {}
+          for line in properties:
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key, value = line.split("=", 1)
+                  values[key.strip()] = value.strip()
+
+          expected_name = values.get("ideviceRestoreVersionName", "")
+          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", expected_name)
+          if not match:
+              raise SystemExit(f"Invalid ideviceRestoreVersionName: {expected_name!r}")
+          major, minor, patch = map(int, match.groups())
+          expected_code = major * 1_000_000 + minor * 1_000 + patch
+
+          metadata_path = Path("android/app/build/outputs/apk/debug/output-metadata.json")
+          metadata = json.loads(metadata_path.read_text())
+          elements = metadata.get("elements") or []
+          if len(elements) != 1:
+              raise SystemExit(f"Expected one debug APK metadata element, found {len(elements)}")
+          element = elements[0]
+          actual_name = str(element.get("versionName", "")).strip()
+          actual_code = int(element.get("versionCode", -1))
+          if actual_name != expected_name:
+              raise SystemExit(f"versionName mismatch: expected {expected_name}, got {actual_name}")
+          if actual_code != expected_code:
+              raise SystemExit(f"versionCode mismatch: expected {expected_code}, got {actual_code}")
+          print(f"Verified user-facing version {actual_name} (versionCode {actual_code})")
+          PY
+
       - name: Upload debug APK
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
