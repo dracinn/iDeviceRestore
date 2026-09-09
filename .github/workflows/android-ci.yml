@@ -33,7 +33,7 @@ jobs:
             echo "No Android-impacting changes detected; build steps will be skipped."
           else
             echo "android=true" >> "$GITHUB_OUTPUT"
-            echo "Android-impacting changes detected; running the debug APK build."
+            echo "Android-impacting changes detected; running Android builds."
           fi
 
       - name: Set up Node.js 24 LTS
@@ -63,11 +63,17 @@ jobs:
           java -version
           gradle --version
 
-      - name: Build debug APK
+      - name: Build production and four UI preview APKs
         if: steps.changes.outputs.android == 'true'
-        run: gradle -p android --no-daemon --stacktrace assembleDebug
+        run: >-
+          gradle -p android --no-daemon --stacktrace
+          assembleProductionDebug
+          assemblePreviewHomeDebug
+          assemblePreviewFirmwareDebug
+          assemblePreviewRestoreDebug
+          assemblePreviewDiagnosticsDebug
 
-      - name: Verify user-facing version metadata
+      - name: Verify user-facing production version metadata
         if: steps.changes.outputs.android == 'true'
         shell: bash
         run: |
@@ -90,11 +96,11 @@ jobs:
           major, minor, patch = map(int, match.groups())
           expected_code = major * 1_000_000 + minor * 1_000 + patch
 
-          metadata_path = Path("android/app/build/outputs/apk/debug/output-metadata.json")
+          metadata_path = Path("android/app/build/outputs/apk/production/debug/output-metadata.json")
           metadata = json.loads(metadata_path.read_text())
           elements = metadata.get("elements") or []
           if len(elements) != 1:
-              raise SystemExit(f"Expected one debug APK metadata element, found {len(elements)}")
+              raise SystemExit(f"Expected one production debug APK metadata element, found {len(elements)}")
           element = elements[0]
           actual_name = str(element.get("versionName", "")).strip()
           actual_code = int(element.get("versionCode", -1))
@@ -102,15 +108,51 @@ jobs:
               raise SystemExit(f"versionName mismatch: expected {expected_name}, got {actual_name}")
           if actual_code != expected_code:
               raise SystemExit(f"versionCode mismatch: expected {expected_code}, got {actual_code}")
-          print(f"Verified user-facing version {actual_name} (versionCode {actual_code})")
+          print(f"Verified production version {actual_name} (versionCode {actual_code})")
           PY
 
-      - name: Upload debug APK
+      - name: Upload production debug APK
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: iDeviceRestore-android-production-debug
+          path: android/app/build/outputs/apk/production/debug/app-production-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Home preview APK
+        if: steps.changes.outputs.android == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDeviceRestore-preview-home
+          path: android/app/build/outputs/apk/previewHome/debug/app-previewHome-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Firmware preview APK
+        if: steps.changes.outputs.android == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDeviceRestore-preview-firmware
+          path: android/app/build/outputs/apk/previewFirmware/debug/app-previewFirmware-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Restore preview APK
+        if: steps.changes.outputs.android == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDeviceRestore-preview-restore
+          path: android/app/build/outputs/apk/previewRestore/debug/app-previewRestore-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Diagnostics preview APK
+        if: steps.changes.outputs.android == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDeviceRestore-preview-diagnostics
+          path: android/app/build/outputs/apk/previewDiagnostics/debug/app-previewDiagnostics-debug.apk
           if-no-files-found: error
           retention-days: 14
 
