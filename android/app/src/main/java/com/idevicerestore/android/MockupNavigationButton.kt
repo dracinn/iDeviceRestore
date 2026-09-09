@@ -5,25 +5,20 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.util.AttributeSet
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-/**
- * Interaction layer for the approved Android mockup.
- *
- * The visible controls are intentionally presentation-first. Existing app functions live behind
- * these controls as delegates so functional wiring never changes the mockup's layout or styling.
- */
+/** Interaction layer for the approved Android mockup. */
 class MockupNavigationButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = com.google.android.material.R.attr.materialButtonStyle
 ) : MaterialButton(context, attrs, defStyleAttr) {
 
-    init {
-        setOnClickListener { route(tag?.toString()) }
-    }
+    init { setOnClickListener { route(tag?.toString()) } }
 
     private fun route(action: String?) {
         when (action) {
@@ -43,57 +38,52 @@ class MockupNavigationButton @JvmOverloads constructor(
 
     private fun runFirmwareAction() {
         val download = rootView.findViewById<View?>(R.id.downloadFirmwareButton)
-        if (download?.isEnabled == true) {
-            download.performClick()
-        } else {
-            delegateClick(R.id.selectFirmwareButton, "Choose signed firmware before downloading")
-        }
+        if (download?.isEnabled == true) download.performClick()
+        else delegateClick(R.id.selectFirmwareButton, "Choose signed firmware before downloading")
     }
 
     private fun continueRestoreFlow() {
         val restore = rootView.findViewById<View?>(R.id.startRestoreDelegateButton)
-        if (restore?.isEnabled == true) {
-            restore.performClick()
-            return
-        }
-
+        if (restore?.isEnabled == true) { restore.performClick(); return }
         val selector = rootView.findViewById<View?>(R.id.selectFirmwareButton)
-        if (selector?.isEnabled == true) {
-            selector.performClick()
-            return
-        }
-
-        Toast.makeText(
-            context,
-            "Connect and identify a supported Apple device before continuing",
-            Toast.LENGTH_SHORT
-        ).show()
+        if (selector?.isEnabled == true) { selector.performClick(); return }
+        Toast.makeText(context, "Connect and identify a supported Apple device before continuing", Toast.LENGTH_SHORT).show()
     }
 
     private fun delegateClick(viewId: Int, unavailableMessage: String) {
         val delegate = rootView.findViewById<View?>(viewId)
-        if (delegate?.isEnabled == true) {
-            delegate.performClick()
-        } else {
-            Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
-        }
+        if (delegate?.isEnabled == true) delegate.performClick()
+        else Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
     }
 
     private fun openBootDiagnostics() {
-        AndroidUiBridge.activity(context)?.startActivity(
-            Intent(context, BootDiagnosticsActivity::class.java)
-        )
+        AndroidUiBridge.activity(context)?.startActivity(Intent(context, BootDiagnosticsActivity::class.java))
     }
 
     private fun showScreen(targetId: Int, selectedNavAction: String?) {
         val root = rootView
-        SCREEN_IDS.forEach { id ->
-            root.findViewById<View?>(id)?.visibility = if (id == targetId) View.VISIBLE else View.GONE
-        }
-        root.findViewById<View?>(targetId)?.let { target ->
-            target.post { target.scrollTo(0, 0) }
-        }
+        if (targetId == R.id.screenFirmware) installFirmwareReference(root.findViewById(targetId))
+        SCREEN_IDS.forEach { id -> root.findViewById<View?>(id)?.visibility = if (id == targetId) View.VISIBLE else View.GONE }
+        root.findViewById<View?>(targetId)?.let { target -> target.post { target.scrollTo(0, 0) } }
         updateBottomNavigation(selectedNavAction)
+    }
+
+    /**
+     * Keeps the legacy functional controls in the hierarchy as invisible delegates while the
+     * approved FirmwareReferenceView owns every visible pixel of the firmware destination.
+     */
+    private fun installFirmwareReference(screen: ViewGroup?) {
+        if (screen == null || screen.getTag(R.id.screenFirmware) == "reference-installed") return
+        val legacy = if (screen.childCount > 0) screen.getChildAt(0) else null
+        if (legacy != null) screen.removeView(legacy)
+        val wrapper = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        if (legacy != null) {
+            legacy.visibility = View.GONE
+            wrapper.addView(legacy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        wrapper.addView(FirmwareReferenceView(context), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        screen.addView(wrapper, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        screen.setTag(R.id.screenFirmware, "reference-installed")
     }
 
     private fun updateBottomNavigation(selectedAction: String?) {
@@ -103,9 +93,7 @@ class MockupNavigationButton @JvmOverloads constructor(
             val button = rootView.findViewById<MaterialButton?>(id) ?: return@forEach
             val selected = selectedAction != null && button.tag?.toString() == selectedAction
             val tint = ColorStateList.valueOf(if (selected) primary else secondary)
-            button.setTextColor(tint)
-            button.iconTint = tint
-            button.isSelected = selected
+            button.setTextColor(tint); button.iconTint = tint; button.isSelected = selected
         }
     }
 
@@ -124,20 +112,7 @@ class MockupNavigationButton @JvmOverloads constructor(
         private const val ACTION_FIRMWARE_SELECT = "firmware_select"
         private const val ACTION_FIRMWARE_ACTION = "firmware_action"
         private const val ACTION_RESTORE_CONTINUE = "restore_continue"
-
-        private val SCREEN_IDS = intArrayOf(
-            R.id.screenHome,
-            R.id.screenFirmware,
-            R.id.screenRestore,
-            R.id.screenDiagnostics,
-            R.id.screenTools
-        )
-        private val NAV_BUTTON_IDS = intArrayOf(
-            R.id.navHomeButton,
-            R.id.navDevicesButton,
-            R.id.navFirmwareButton,
-            R.id.navRestoreButton,
-            R.id.navMoreButton
-        )
+        private val SCREEN_IDS = intArrayOf(R.id.screenHome, R.id.screenFirmware, R.id.screenRestore, R.id.screenDiagnostics, R.id.screenTools)
+        private val NAV_BUTTON_IDS = intArrayOf(R.id.navHomeButton, R.id.navDevicesButton, R.id.navFirmwareButton, R.id.navRestoreButton, R.id.navMoreButton)
     }
 }
