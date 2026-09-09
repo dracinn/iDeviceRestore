@@ -5,6 +5,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.widget.RadioButton
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
@@ -25,6 +26,7 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.downloadDirectoryText.text = firmwareStorage.projectRoot.absolutePath
         binding.appVersionText.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+        updateAria2ConnectionValue()
 
         binding.automaticDeviceDetectionSwitch.isChecked = appSettings.automaticDeviceDetection
         binding.automaticDeviceDetectionSwitch.setOnCheckedChangeListener { _, checked ->
@@ -52,6 +54,8 @@ class SettingsActivity : AppCompatActivity() {
             appSettings.organizeFirmwareByDevice = checked
         }
 
+        binding.aria2ConnectionsRow.setOnClickListener { showAria2ConnectionsChooser() }
+
         when (appSettings.appearanceMode) {
             AppSettings.AppearanceMode.SYSTEM -> binding.appearanceSystemRadio.isChecked = true
             AppSettings.AppearanceMode.LIGHT -> binding.appearanceLightRadio.isChecked = true
@@ -78,6 +82,25 @@ class SettingsActivity : AppCompatActivity() {
         binding.doneButton.setOnClickListener { finish() }
     }
 
+    private fun showAria2ConnectionsChooser() {
+        val choices = intArrayOf(1, 2, 4, 8, 16)
+        val labels = choices.map { "$it connection${if (it == 1) "" else "s"}" }.toTypedArray()
+        val selectedIndex = choices.indexOf(appSettings.aria2Connections).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("aria2c Connections")
+            .setSingleChoiceItems(labels, selectedIndex) { dialog, which ->
+                appSettings.aria2Connections = choices[which]
+                updateAria2ConnectionValue()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateAria2ConnectionValue() {
+        binding.aria2ConnectionsValue.text = "${appSettings.aria2Connections}   ›"
+    }
+
     private fun shareSettingsReport() {
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
         val session = SessionLogSnapshotStore.snapshot()
@@ -94,20 +117,25 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Include beta/RC firmware: ${appSettings.includeBetaFirmware}")
             appendLine("Organize firmware by device: ${appSettings.organizeFirmwareByDevice}")
             appendLine("Firmware project root: ${firmwareStorage.projectRoot.absolutePath}")
-            appendLine("Firmware downloader: official aria2c, up to 8 connections")
+            appendLine("Firmware downloader: official aria2c, ${appSettings.aria2Connections} connection(s)")
             appendLine("Appearance: ${appSettings.appearanceMode.storedValue}")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared reports")
             appendLine("---")
             appendLine(RestorePreflightEvidenceStore.preflightSummary())
             appendLine("---")
             appendLine("=== Activity Log ===")
-            if (session.activityLog.isBlank()) appendLine("No activity log entries captured in this process.")
-            else append(session.activityLog).also {
+            if (session.activityLog.isBlank()) {
+                appendLine("No activity log entries captured in this process.")
+            } else {
+                append(session.activityLog)
                 if (!session.activityLog.endsWith('\n')) appendLine()
             }
             appendLine("=== Probe Log ===")
-            if (session.probeLog.isBlank()) appendLine("No USB probe log entries captured in this process.")
-            else append(session.probeLog)
+            if (session.probeLog.isBlank()) {
+                appendLine("No USB probe log entries captured in this process.")
+            } else {
+                append(session.probeLog)
+            }
         }
         val share = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
