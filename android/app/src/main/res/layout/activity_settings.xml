@@ -30,9 +30,9 @@
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
                     <TextView android:layout_width="match_parent" android:layout_height="30dp" android:gravity="center_vertical" android:paddingStart="10dp" android:text="App Behavior" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
                     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
-                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Automatically detect devices" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
-                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Check for app updates at launch" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
-                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="false" android:text="Use verbose logging" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/automaticDeviceDetectionSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Automatically detect devices" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/checkForUpdatesSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Check for app updates at launch" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/verboseLoggingSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Use verbose logging" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <androidx.appcompat.widget.SwitchCompat android:id="@+id/includeBetaFirmwareSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Include beta and RC firmware" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <TextView android:id="@+id/betaFirmwareSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="8dp" android:text="Apple signing is still reverified before use." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
                 </LinearLayout>
@@ -50,11 +50,11 @@
                         <TextView android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:text="›" android:textColor="@color/mock_text_secondary" android:textSize="20sp" />
                     </LinearLayout>
                     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
-                    <androidx.appcompat.widget.SwitchCompat android:layout_width="match_parent" android:layout_height="52dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:checked="true" android:text="Organize firmware by device" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/organizeFirmwareByDeviceSwitch" android:layout_width="match_parent" android:layout_height="52dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Organize firmware by device" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="42dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="8dp">
                         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Concurrent Downloads" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
-                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3   ›" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1   ›" android:textColor="@color/mock_text_secondary" android:textSize="11sp" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -82,6 +82,7 @@
                         </LinearLayout>
                     </LinearLayout>
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="6dp" android:text="Restore. Update. Diagnose. For Apple devices." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
+                    <com.google.android.material.button.MaterialButton android:id="@+id/shareLogsButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="38dp" android:gravity="start|center_vertical" android:text="Share Logs    ›" android:textColor="@color/mock_primary" />
                     <com.google.android.material.button.MaterialButton android:id="@+id/openBootDiagnosticsButton" style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent" android:layout_height="38dp" android:gravity="start|center_vertical" android:text="Open Boot Diagnostics    ›" android:textColor="@color/mock_primary" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
