@@ -1,6 +1,6 @@
 package com.idevicerestore.android
 
-import org.json.JSONObject
+import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -28,8 +28,8 @@ class AppUpdateChecker(
     }
 
     private fun check(currentVersion: String): Update? {
-        logger("App update check: querying latest GitHub release")
-        val connection = (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
+        logger("App update check: querying GitHub releases for latest user-facing semantic version")
+        val connection = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
             readTimeout = 10_000
@@ -43,13 +43,29 @@ class AppUpdateChecker(
                 return null
             }
             val json = connection.inputStream.bufferedReader().use { it.readText() }
-            val objectValue = JSONObject(json)
-            val tag = objectValue.optString("tag_name").trim()
-            val releaseUrl = objectValue.optString("html_url").trim()
-            if (tag.isBlank() || releaseUrl.isBlank()) return null
-            val newer = compareVersions(tag, currentVersion) > 0
-            logger("App update check: latest=$tag current=$currentVersion newer=$newer")
-            return if (newer) Update(tag, releaseUrl, currentVersion) else null
+            val releases = JSONArray(json)
+            var latestTag: String? = null
+            var latestUrl: String? = null
+            for (index in 0 until releases.length()) {
+                val release = releases.optJSONObject(index) ?: continue
+                if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
+                val tag = release.optString("tag_name").trim()
+                if (!SEMANTIC_RELEASE_REGEX.matches(tag)) continue
+                val releaseUrl = release.optString("html_url").trim()
+                if (releaseUrl.isBlank()) continue
+                latestTag = tag
+                latestUrl = releaseUrl
+                break
+            }
+
+            if (latestTag == null || latestUrl == null) {
+                logger("App update check: no x.y.z user-facing release found; historical pseudo releases ignored")
+                return null
+            }
+
+            val newer = compareVersions(latestTag, currentVersion) > 0
+            logger("App update check: latest=$latestTag current=$currentVersion newer=$newer")
+            return if (newer) Update(latestTag, latestUrl, currentVersion) else null
         } finally {
             connection.disconnect()
         }
@@ -83,7 +99,8 @@ class AppUpdateChecker(
     }
 
     companion object {
-        private const val LATEST_RELEASE_API =
-            "https://api.github.com/repos/dracinn/iDeviceRestore/releases/latest"
+        private val SEMANTIC_RELEASE_REGEX = Regex("^[vV]?\\d+\\.\\d+\\.\\d+$")
+        private const val RELEASES_API =
+            "https://api.github.com/repos/dracinn/iDeviceRestore/releases?per_page=30"
     }
 }
