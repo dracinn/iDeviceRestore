@@ -35,6 +35,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
     private val referenceStateMirror = object : Runnable {
         override fun run() {
             mirrorReferenceState()
+            syncFirmwareSelectionAffordances()
             if (isAttachedToWindow) postDelayed(this, 350L)
         }
     }
@@ -178,6 +179,25 @@ class InsetAwareShellLayout @JvmOverloads constructor(
             isFocusable = true
             contentDescription = "Select signed firmware"
             setOnClickListener(openSelector)
+        }
+    }
+
+    private fun syncFirmwareSelectionAffordances() {
+        val selector = findViewById<MaterialButton?>(R.id.selectFirmwareButton) ?: return
+        val available = selector.isEnabled
+        val alpha = if (available) 1f else 0.55f
+
+        val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
+        (connectedLabel?.parent?.parent as? View)?.alpha = alpha
+        findTextView(this) { it.text?.toString() == "See All" }?.alpha = alpha
+
+        findViewById<TextView?>(R.id.homeFirmwareSummary)?.let { summary ->
+            summary.alpha = alpha
+            if (!available && summary.text?.toString() == "Select firmware") {
+                summary.contentDescription = "Firmware selection unavailable until a device is identified"
+            } else {
+                summary.contentDescription = "Select signed firmware"
+            }
         }
     }
 
