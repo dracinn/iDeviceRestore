@@ -9,19 +9,20 @@ import kotlin.math.ceil
 import kotlin.math.min
 
 /**
- * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
+ * Firmware workspace rooted in the user's configurable shared-storage project directory.
  *
  * The active payload layout follows the user's "Organize firmware by device" setting:
  *   enabled:  Firmware/<identifier>/IPSW/<version>-<build>/<firmware>.ipsw
  *   disabled: Firmware/IPSW/<version>-<build>/<firmware>.ipsw
  *
- * Metadata and diagnostic logs remain device-scoped in both modes. When the setting changes,
- * locationFor() migrates the selected payload and its resumable-download sidecars from the previous
- * layout by rename on the same shared-storage volume. Existing duplicates are never deleted
- * automatically because matching names or sizes are not sufficient proof of byte identity.
+ * Metadata and diagnostic logs remain device-scoped in both modes. When the organization setting
+ * changes, locationFor() migrates the selected payload and its resumable-download sidecars from the
+ * previous layout by rename on the same shared-storage volume. Existing duplicates are never
+ * deleted automatically because matching names or sizes are not sufficient proof of byte identity.
  *
- * Storage is deliberately passive: it never starts firmware verification or BuildManifest parsing.
- * The automatic preparation pipeline owns those operations after a firmware is selected and ready.
+ * Changing the project-folder setting migrates the whole project root with one same-volume rename.
+ * That operation is blocked while a firmware download is active and never merges into a non-empty
+ * destination directory.
  *
  * Android 11+ requires MANAGE_EXTERNAL_STORAGE (All files access) for direct File access here.
  */
@@ -47,16 +48,23 @@ class FirmwareStorage(
         val catalogCache: File
     )
 
-    /** Existing user-visible project folder at the root of primary shared storage. */
+    data class RootMigrationResult(
+        val success: Boolean,
+        val projectRoot: File,
+        val message: String
+    )
+
+    /** User-visible project folder at the root of primary shared storage. */
     val projectRoot: File
-        get() = File(Environment.getExternalStorageDirectory(), "iDeviceRestore")
+        get() = File(Environment.getExternalStorageDirectory(), appSettings.projectFolderName)
 
     fun hasSharedStorageAccess(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
             @Suppress("DEPRECATION")
-            Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED && projectRoot.canWrite()
+            Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED &&
+                (projectRoot.isDirectory || projectRoot.parentFile?.canWrite() == true)
         }
 
     fun requireSharedStorageAccess() {
@@ -64,6 +72,63 @@ class FirmwareStorage(
             "Shared storage access is required for ${projectRoot.absolutePath}. " +
                 "Enable 'Allow access to manage all files' for iDeviceRestore."
         }
+    }
+
+    /**
+     * Move the entire iDeviceRestore project folder to another top-level shared-storage folder.
+     * This intentionally supports one folder component rather than arbitrary paths so the existing
+     * direct-file downloader cannot be redirected outside primary shared storage.
+     */
+    fun migrateProjectRootFolder(requestedFolderName: String): RootMigrationResult {
+        requireSharedStorageAccess()
+        val newName = AppSettings.sanitizeProjectFolderName(requestedFolderName)
+        val oldName = appSettings.projectFolderName
+        val oldRoot = File(Environment.getExternalStorageDirectory(), oldName)
+        val newRoot = File(Environment.getExternalStorageDirectory(), newName)
+
+        if (newName == oldName) {
+            return RootMigrationResult(true, oldRoot, "Firmware project folder is unchanged")
+        }
+        if (FirmwareDownloadService.isDownloadActive()) {
+            return RootMigrationResult(
+                false,
+                oldRoot,
+                "Finish or cancel the active firmware download before moving the project folder"
+            )
+        }
+
+        if (!oldRoot.exists()) {
+            appSettings.projectFolderName = newName
+            ensureDirectory(newRoot)
+            logger("FirmwareStorage: project root initialized at ${newRoot.absolutePath}")
+            return RootMigrationResult(true, newRoot, "Firmware project folder updated")
+        }
+
+        if (newRoot.exists()) {
+            val entries = newRoot.listFiles()
+            if (entries == null || entries.isNotEmpty()) {
+                return RootMigrationResult(
+                    false,
+                    oldRoot,
+                    "Destination already exists and is not empty: ${newRoot.absolutePath}"
+                )
+            }
+            if (!newRoot.delete()) {
+                return RootMigrationResult(false, oldRoot, "Could not prepare ${newRoot.absolutePath}")
+            }
+        }
+
+        if (!oldRoot.renameTo(newRoot)) {
+            return RootMigrationResult(
+                false,
+                oldRoot,
+                "Could not move the project folder. No setting was changed."
+            )
+        }
+
+        appSettings.projectFolderName = newName
+        logger("FirmwareStorage: project root migrated ${oldRoot.absolutePath} -> ${newRoot.absolutePath}")
+        return RootMigrationResult(true, newRoot, "Firmware project folder moved successfully")
     }
 
     fun prepare(identifier: String): Workspace {
@@ -115,7 +180,7 @@ class FirmwareStorage(
         expectedBytes: Long,
         reserveBytes: Long = 256L * 1024 * 1024
     ): Boolean {
-        if (expectedBytes <= 0) return true
+        if (expectedBytes <= 0L) return true
         val available = availableBytes(identifier)
         val required = expectedBytes + reserveBytes
         logger("FirmwareStorage: free=$available required=$required payload=$expectedBytes reserve=$reserveBytes")
@@ -136,8 +201,7 @@ class FirmwareStorage(
         if (aria2Control.isFile) {
             // aria2 split downloads can write high ranges first, so logical file length is not a
             // progress signal. With --file-allocation=none, filesystem allocated blocks represent
-            // storage already consumed by the sparse partial, which is exactly what the free-space
-            // check needs when calculating how much additional capacity is required to finish.
+            // storage already consumed by the sparse partial.
             val allocated = allocatedBytes(part)
             val accounted = firmware.fileSize.takeIf { it > 0L }?.let { min(allocated, it) } ?: allocated
             logger(
@@ -156,8 +220,6 @@ class FirmwareStorage(
             return 0L
         }
 
-        // A full-length untagged .part is ambiguous because older adaptive transfers preallocated
-        // their payload. Never treat logical length alone as completed data for free-space checks.
         if (firmware.fileSize > 0L && part.length() >= firmware.fileSize) return 0L
         return part.length()
     }
@@ -212,7 +274,7 @@ class FirmwareStorage(
     }
 
     /**
-     * Migrate the selected firmware between the old shared cache and the by-device layout when the
+     * Migrate the selected firmware between the shared cache and the by-device layout when the
      * preference changes. This is intentionally lazy so a setting change does not walk or rewrite
      * a potentially huge firmware library on the UI thread.
      */
