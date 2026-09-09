@@ -76,13 +76,7 @@ jobs:
               raise SystemExit(f'Invalid semantic version {base_version!r}')
           major, minor, patch = map(int, m.groups())
           expected_code = major * 1_000_000 + minor * 1_000 + patch
-
-          expected = {
-              'reference': 'com.idevicerestore.android.preview.reference',
-              'compact': 'com.idevicerestore.android.preview.compact',
-              'comfort': 'com.idevicerestore.android.preview.comfort',
-              'minimal': 'com.idevicerestore.android.preview.minimal',
-          }
+          expected_flavors = {'reference', 'compact', 'comfort', 'minimal'}
           found = {}
           for metadata_path in Path('android/app/build/outputs/apk').glob('*/debug/output-metadata.json'):
               flavor = metadata_path.parent.parent.name
@@ -97,11 +91,11 @@ jobs:
                   'versionCode': int(element.get('versionCode', -1)),
                   'apk': str(metadata_path.parent / element.get('outputFile', '')),
               }
-          if set(found) != set(expected):
-              raise SystemExit(f'Expected flavors {sorted(expected)}, found {sorted(found)}')
-          for flavor, package in expected.items():
+          if set(found) != expected_flavors:
+              raise SystemExit(f'Expected flavors {sorted(expected_flavors)}, found {sorted(found)}')
+          for flavor in sorted(expected_flavors):
               item = found[flavor]
-              if item['applicationId'] != package:
+              if item['applicationId'] != 'com.idevicerestore.android':
                   raise SystemExit(f'{flavor}: package mismatch {item["applicationId"]!r}')
               if item['versionName'] != f'{base_version}-{flavor}':
                   raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}')
@@ -116,7 +110,7 @@ jobs:
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-four-full-app-designs
+          name: iDeviceRestore-four-full-app-designs-stable-package
           path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14
