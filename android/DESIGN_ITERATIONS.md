@@ -10,4 +10,4 @@ Iterations:
 - Comfort: larger cards, controls and typography for touch-first use.
 - Minimal: flatter cards and reduced decoration while keeping the same information architecture.
 
-All four variants contain the same complete app features and use unique application IDs so they can be installed side by side for comparison.
+All four variants contain the same complete app features and intentionally use the production package ID `com.idevicerestore.android` so package-dependent startup and USB-routing behavior matches the normal app. Install and compare the preview variants one at a time rather than side by side.
