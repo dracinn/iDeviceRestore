@@ -22,6 +22,7 @@ class IDeviceRestoreApplication : Application(), Application.ActivityLifecycleCa
             AppCompatDelegate.setDefaultNightMode(mode)
         }
 
+        UsbAutoDetectionPolicy.apply(this, settings.automaticDeviceDetection)
         registerActivityLifecycleCallbacks(this)
         if (settings.checkForAppUpdatesAtLaunch) {
             AppUpdateChecker().checkAsync(BuildConfig.VERSION_NAME) { update ->
