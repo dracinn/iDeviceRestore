@@ -32,7 +32,7 @@
                     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/mock_separator" />
                     <androidx.appcompat.widget.SwitchCompat android:id="@+id/automaticDeviceDetectionSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Automatically detect devices" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <androidx.appcompat.widget.SwitchCompat android:id="@+id/checkForUpdatesSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Check for app updates at launch" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
-                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/verboseLoggingSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Use verbose logging" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
+                    <androidx.appcompat.widget.SwitchCompat android:id="@+id/verboseLoggingSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Use verbose diagnostic logging" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <androidx.appcompat.widget.SwitchCompat android:id="@+id/includeBetaFirmwareSwitch" android:layout_width="match_parent" android:layout_height="42dp" android:paddingStart="10dp" android:paddingEnd="8dp" android:text="Include beta and RC firmware" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
                     <TextView android:id="@+id/betaFirmwareSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="8dp" android:text="Apple signing is still reverified before use." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
                 </LinearLayout>
@@ -45,7 +45,7 @@
                     <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="8dp">
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
                             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Default Download Directory" android:textColor="@color/mock_text_primary" android:textSize="11sp" />
-                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="/storage/emulated/0/iDeviceRestore" android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
+                            <TextView android:id="@+id/downloadDirectoryText" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
                         </LinearLayout>
                         <TextView android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:text="›" android:textColor="@color/mock_text_secondary" android:textSize="20sp" />
                     </LinearLayout>
@@ -78,7 +78,7 @@
                         <ImageView android:layout_width="46dp" android:layout_height="46dp" android:background="@drawable/mock_asset_restore" android:contentDescription="iDeviceRestore" android:padding="7dp" android:src="@drawable/ic_tools" app:tint="@android:color/white" />
                         <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
                             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/mock_text_primary" android:textSize="12sp" android:textStyle="bold" />
-                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Current build" android:textColor="@color/mock_text_secondary" android:textSize="10sp" />
+                            <TextView android:id="@+id/appVersionText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Current build" android:textColor="@color/mock_text_secondary" android:textSize="10sp" />
                         </LinearLayout>
                     </LinearLayout>
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="6dp" android:text="Restore. Update. Diagnose. For Apple devices." android:textColor="@color/mock_text_secondary" android:textSize="9sp" />
