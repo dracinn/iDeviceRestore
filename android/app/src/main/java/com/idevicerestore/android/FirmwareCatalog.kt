@@ -74,26 +74,32 @@ class FirmwareCatalog(
         return devices
     }
 
-    /** Match Apple's Recovery/DFU CPID + BDID pair to the catalog's concrete product. */
+    /** Match Apple's Recovery/DFU CPID + BDID pair to one concrete catalog product. */
     fun findDeviceByBootIds(cpid: Int, bdid: Int): Device? {
         logger("FirmwareCatalog: identify CPID=0x%04X (%d) BDID=0x%02X (%d)".format(cpid, cpid, bdid, bdid))
         val candidates = listDevices().filter { it.cpid == cpid && it.bdid == bdid }
-        val device = when {
-            candidates.isEmpty() -> null
-            candidates.size == 1 -> candidates.first()
-            else -> {
-                logger("FirmwareCatalog: ${candidates.size} device records share CPID/BDID; using ${candidates.first().identifier}")
-                candidates.first()
-            }
+        if (candidates.isEmpty()) return null
+        if (candidates.size != 1) {
+            logger(
+                "FirmwareCatalog: identification ambiguous; ${candidates.size} device records share " +
+                    "CPID=0x%04X BDID=0x%02X. No device will be remembered or offered for firmware browsing."
+                        .format(cpid, bdid)
+            )
+            return null
         }
-        if (device != null) {
-            DeviceSupportPolicy.blockReason(device)?.let { reason ->
-                logger("FirmwareCatalog: BLOCKED: $reason")
-            }
-            DeviceSupportPolicy.requireSupported(device)
-            IDeviceRestoreApplication.contextOrNull()?.let { context ->
-                ConnectedDeviceHistory(context).record(device)
-                logger("FirmwareCatalog: remembered connected device ${device.identifier} for firmware browsing")
+
+        val device = candidates.single()
+        DeviceSupportPolicy.blockReason(device)?.let { reason ->
+            logger("FirmwareCatalog: BLOCKED: $reason")
+        }
+        DeviceSupportPolicy.requireSupported(device)
+        IDeviceRestoreApplication.contextOrNull()?.let { context ->
+            ConnectedDeviceHistory(context).record(device)
+            logger("FirmwareCatalog: remembered connected device ${device.identifier} for firmware browsing")
+        }
+        IDeviceRestoreApplication.currentActivityOrNull()?.let { activity ->
+            activity.runOnUiThread {
+                ConnectedFirmwareBrowser.refreshIfVisible(activity)
             }
         }
         return device
