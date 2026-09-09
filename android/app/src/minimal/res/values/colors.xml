@@ -1,0 +1,8 @@
+<resources>
+    <color name="mock_primary">#0A66D8</color><color name="mock_primary_dark">#084FA6</color>
+    <color name="mock_background">#FAFBFC</color><color name="mock_surface">#FFFFFF</color>
+    <color name="mock_surface_secondary">#F3F5F7</color><color name="mock_surface_tertiary">#F3F5F7</color>
+    <color name="mock_separator">#E3E7EB</color><color name="mock_success">#188A43</color>
+    <color name="mock_success_surface">#EDF7F0</color><color name="mock_text_primary">#101418</color>
+    <color name="mock_text_secondary">#64707D</color>
+</resources>
