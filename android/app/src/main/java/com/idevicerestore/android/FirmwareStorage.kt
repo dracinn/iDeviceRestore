@@ -11,14 +11,14 @@ import kotlin.math.min
 /**
  * Firmware workspace rooted in the user's shared-storage iDeviceRestore directory.
  *
- * Canonical layout:
- *   /storage/emulated/0/iDeviceRestore/Firmware/IPSW/<version>-<build>/<firmware>.ipsw
- *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Metadata/catalog.json
- *   /storage/emulated/0/iDeviceRestore/Firmware/<identifier>/Logs/
+ * The active payload layout follows the user's "Organize firmware by device" setting:
+ *   enabled:  Firmware/<identifier>/IPSW/<version>-<build>/<firmware>.ipsw
+ *   disabled: Firmware/IPSW/<version>-<build>/<firmware>.ipsw
  *
- * IPSW payloads are deliberately device-independent. A UniversalMac or other restore image that is
- * valid for multiple identifiers is stored once in the shared IPSW cache instead of being copied
- * into every device workspace. Device-specific metadata and logs remain isolated by identifier.
+ * Metadata and diagnostic logs remain device-scoped in both modes. When the setting changes,
+ * locationFor() migrates the selected payload and its resumable-download sidecars from the previous
+ * layout by rename on the same shared-storage volume. Existing duplicates are never deleted
+ * automatically because matching names or sizes are not sufficient proof of byte identity.
  *
  * Storage is deliberately passive: it never starts firmware verification or BuildManifest parsing.
  * The automatic preparation pipeline owns those operations after a firmware is selected and ready.
@@ -29,10 +29,12 @@ class FirmwareStorage(
     private val context: Context,
     private val logger: (String) -> Unit = {}
 ) {
+    private val appSettings by lazy { AppSettings(context) }
+
     data class Workspace(
         val root: File,
         val device: File,
-        /** Shared physical IPSW cache used by every device identifier. */
+        /** Active IPSW root selected by the current storage organization preference. */
         val firmware: File,
         val metadata: File,
         val logs: File
@@ -69,13 +71,20 @@ class FirmwareStorage(
         val safeIdentifier = safeComponent(identifier)
         val root = File(projectRoot, "Firmware")
         val device = File(root, safeIdentifier)
-        val firmware = File(root, "IPSW")
+        val firmware = if (appSettings.organizeFirmwareByDevice) {
+            File(device, "IPSW")
+        } else {
+            File(root, "IPSW")
+        }
         val metadata = File(device, "Metadata")
         val logs = File(device, "Logs")
         listOf(projectRoot, root, device, firmware, metadata, logs).forEach(::ensureDirectory)
-        logger("FirmwareStorage: shared project root=${projectRoot.absolutePath}")
+        logger("FirmwareStorage: project root=${projectRoot.absolutePath}")
         logger("FirmwareStorage: device workspace=${device.absolutePath}")
-        logger("FirmwareStorage: shared IPSW cache=${firmware.absolutePath}")
+        logger(
+            "FirmwareStorage: IPSW organization=${if (appSettings.organizeFirmwareByDevice) "by-device" else "shared"} " +
+                "path=${firmware.absolutePath}"
+        )
         return Workspace(root, device, firmware, metadata, logs)
     }
 
@@ -88,7 +97,7 @@ class FirmwareStorage(
             safeFileName("${firmware.identifier}_${firmware.version}_${firmware.buildId}.ipsw")
         }
         val destination = File(buildDirectory, fileName)
-        migrateLegacyDevicePayload(firmware, buildName, fileName, destination)
+        migrateAlternatePayloadLayout(firmware, buildName, fileName, destination)
         return FirmwareLocation(
             workspace = workspace,
             buildDirectory = buildDirectory,
@@ -198,56 +207,66 @@ class FirmwareStorage(
         val destination = locationFor(firmware).file
         var deleted = 0
         partialFiles(destination).forEach { if (it.delete()) deleted++ }
-        logger("FirmwareStorage: removed $deleted shared partial file(s) for ${firmware.buildId}")
+        logger("FirmwareStorage: removed $deleted partial file(s) for ${firmware.buildId}")
         return deleted
     }
 
     /**
-     * Builds before the shared cache stored payloads under Firmware/<identifier>/IPSW. Move those
-     * files into the canonical cache without duplicating multi-gigabyte IPSWs. Because both paths
-     * are on the same shared-storage volume, renameTo is normally an in-place filesystem rename.
-     *
-     * We never delete a legacy full file when a canonical destination already exists. That avoids
-     * treating a byte-count match as cryptographic identity. The canonical file is simply preferred
-     * and a diagnostic is emitted so a later maintenance UI can offer safe duplicate cleanup.
+     * Migrate the selected firmware between the old shared cache and the by-device layout when the
+     * preference changes. This is intentionally lazy so a setting change does not walk or rewrite
+     * a potentially huge firmware library on the UI thread.
      */
-    private fun migrateLegacyDevicePayload(
+    private fun migrateAlternatePayloadLayout(
         firmware: FirmwareCatalog.Firmware,
         buildName: String,
         fileName: String,
         destination: File
     ) {
+        val root = File(projectRoot, "Firmware")
         val safeIdentifier = safeComponent(firmware.identifier)
-        val legacyBuildDirectory = File(File(File(projectRoot, "Firmware"), safeIdentifier), "IPSW/$buildName")
-        val legacyFile = File(legacyBuildDirectory, fileName)
+        val deviceRoot = File(root, safeIdentifier)
+        val alternateFirmwareRoot = if (appSettings.organizeFirmwareByDevice) {
+            File(root, "IPSW")
+        } else {
+            File(deviceRoot, "IPSW")
+        }
+        val alternateBuildDirectory = File(alternateFirmwareRoot, buildName)
+        val alternateFile = File(alternateBuildDirectory, fileName)
+        val targetLabel = if (appSettings.organizeFirmwareByDevice) "by-device" else "shared"
 
-        if (!destination.exists() && legacyFile.isFile) {
+        if (!destination.exists() && alternateFile.isFile) {
             ensureDirectory(destination.parentFile ?: return)
-            if (legacyFile.renameTo(destination)) {
-                logger("FirmwareStorage: migrated legacy IPSW into shared cache: ${destination.absolutePath}")
+            if (alternateFile.renameTo(destination)) {
+                logger("FirmwareStorage: migrated IPSW to $targetLabel layout: ${destination.absolutePath}")
             } else {
-                logger("FirmwareStorage: legacy IPSW remains at ${legacyFile.absolutePath}; shared migration rename failed")
+                logger(
+                    "FirmwareStorage: IPSW remains at ${alternateFile.absolutePath}; " +
+                        "$targetLabel layout migration rename failed"
+                )
             }
-        } else if (destination.isFile && legacyFile.isFile) {
-            logger("FirmwareStorage: duplicate legacy IPSW detected at ${legacyFile.absolutePath}; using shared cache copy")
+        } else if (destination.isFile && alternateFile.isFile) {
+            logger(
+                "FirmwareStorage: duplicate IPSW found in alternate layout at ${alternateFile.absolutePath}; " +
+                    "using ${destination.absolutePath}"
+            )
         }
 
-        migrateLegacyPartial(File(legacyFile.absolutePath + ".part"), File(destination.absolutePath + ".part"))
-        legacyBuildDirectory.listFiles().orEmpty()
+        migrateSidecar(File(alternateFile.absolutePath + ".part"), File(destination.absolutePath + ".part"), targetLabel)
+        alternateBuildDirectory.listFiles().orEmpty()
             .filter { it.name.startsWith(fileName + ".part.") }
-            .forEach { legacyPart ->
-                val suffix = legacyPart.name.removePrefix(fileName)
-                migrateLegacyPartial(legacyPart, File(destination.absolutePath + suffix))
+            .forEach { alternatePart ->
+                val suffix = alternatePart.name.removePrefix(fileName)
+                migrateSidecar(alternatePart, File(destination.absolutePath + suffix), targetLabel)
             }
     }
 
-    private fun migrateLegacyPartial(legacy: File, destination: File) {
-        if (!legacy.isFile || destination.exists()) return
+    private fun migrateSidecar(source: File, destination: File, targetLabel: String) {
+        if (!source.isFile || destination.exists()) return
         ensureDirectory(destination.parentFile ?: return)
-        if (legacy.renameTo(destination)) {
-            logger("FirmwareStorage: migrated legacy partial download into shared cache: ${destination.name}")
+        if (source.renameTo(destination)) {
+            logger("FirmwareStorage: migrated partial sidecar to $targetLabel layout: ${destination.name}")
         } else {
-            logger("FirmwareStorage: could not migrate legacy partial download: ${legacy.absolutePath}")
+            logger("FirmwareStorage: could not migrate partial sidecar: ${source.absolutePath}")
         }
     }
 
