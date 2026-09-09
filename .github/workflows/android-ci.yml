@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build-debug-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
 
     steps:
@@ -113,12 +113,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Smoke-test all four APKs on Android 14
+      - name: Smoke-test all four APKs on Android 14 ARM64
         if: steps.changes.outputs.android == 'true'
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
           api-level: 34
-          arch: x86_64
+          arch: arm64-v8a
           profile: pixel_6
           disable-animations: true
           script: >-
