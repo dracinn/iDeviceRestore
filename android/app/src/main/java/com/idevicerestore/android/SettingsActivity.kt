@@ -25,6 +25,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.automaticDeviceDetectionSwitch.isChecked = appSettings.automaticDeviceDetection
         binding.automaticDeviceDetectionSwitch.setOnCheckedChangeListener { _, checked ->
             appSettings.automaticDeviceDetection = checked
+            UsbAutoDetectionPolicy.apply(this, checked)
         }
 
         binding.checkForUpdatesSwitch.isChecked = appSettings.checkForAppUpdatesAtLaunch
@@ -81,11 +82,13 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
             appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
-            appendLine("Automatic device detection: ${appSettings.automaticDeviceDetection}")
+            appendLine("Settings schema: ${appSettings.schemaVersion}")
+            appendLine("Automatic USB attach detection: ${appSettings.automaticDeviceDetection}")
             appendLine("Check for app updates at launch: ${appSettings.checkForAppUpdatesAtLaunch}")
-            appendLine("Verbose logging: ${appSettings.verboseLogging}")
+            appendLine("Verbose diagnostic logging: ${appSettings.verboseLogging}")
             appendLine("Include beta/RC firmware: ${appSettings.includeBetaFirmware}")
             appendLine("Organize firmware by device: ${appSettings.organizeFirmwareByDevice}")
+            appendLine("Firmware downloader: official aria2c, up to 8 connections")
             appendLine("Appearance: ${appSettings.appearanceMode.storedValue}")
             appendLine("Privacy: ECID and Apple serial number are redacted from shared reports")
             appendLine("---")
