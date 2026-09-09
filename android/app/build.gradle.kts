@@ -98,6 +98,38 @@ android {
         }
     }
 
+    flavorDimensions += "design"
+    productFlavors {
+        create("reference") {
+            dimension = "design"
+            applicationIdSuffix = ".preview.reference"
+            versionNameSuffix = "-reference"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Reference"
+            buildConfigField("String", "DESIGN_ITERATION", "\"reference\"")
+        }
+        create("compact") {
+            dimension = "design"
+            applicationIdSuffix = ".preview.compact"
+            versionNameSuffix = "-compact"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Compact"
+            buildConfigField("String", "DESIGN_ITERATION", "\"compact\"")
+        }
+        create("comfort") {
+            dimension = "design"
+            applicationIdSuffix = ".preview.comfort"
+            versionNameSuffix = "-comfort"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Comfort"
+            buildConfigField("String", "DESIGN_ITERATION", "\"comfort\"")
+        }
+        create("minimal") {
+            dimension = "design"
+            applicationIdSuffix = ".preview.minimal"
+            versionNameSuffix = "-minimal"
+            manifestPlaceholders["appLabel"] = "iDeviceRestore Minimal"
+            buildConfigField("String", "DESIGN_ITERATION", "\"minimal\"")
+        }
+    }
+
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/aria2c/jniLibs"))
 
     packaging {
