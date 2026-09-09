@@ -98,6 +98,38 @@ android {
         }
     }
 
+    flavorDimensions += "experience"
+    productFlavors {
+        create("production") {
+            dimension = "experience"
+            buildConfigField("String", "PREVIEW_SCREEN", "\"production\"")
+        }
+        create("previewHome") {
+            dimension = "experience"
+            applicationIdSuffix = ".preview.home"
+            versionNameSuffix = "-preview-home"
+            buildConfigField("String", "PREVIEW_SCREEN", "\"home\"")
+        }
+        create("previewFirmware") {
+            dimension = "experience"
+            applicationIdSuffix = ".preview.firmware"
+            versionNameSuffix = "-preview-firmware"
+            buildConfigField("String", "PREVIEW_SCREEN", "\"firmware\"")
+        }
+        create("previewRestore") {
+            dimension = "experience"
+            applicationIdSuffix = ".preview.restore"
+            versionNameSuffix = "-preview-restore"
+            buildConfigField("String", "PREVIEW_SCREEN", "\"restore\"")
+        }
+        create("previewDiagnostics") {
+            dimension = "experience"
+            applicationIdSuffix = ".preview.diagnostics"
+            versionNameSuffix = "-preview-diagnostics"
+            buildConfigField("String", "PREVIEW_SCREEN", "\"diagnostics\"")
+        }
+    }
+
     sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/aria2c/jniLibs"))
 
     packaging {
