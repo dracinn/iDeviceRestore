@@ -102,7 +102,6 @@ android {
     productFlavors {
         create("reference") {
             dimension = "design"
-            versionNameSuffix = "-reference"
             manifestPlaceholders["appLabel"] = "iDeviceRestore Reference"
             buildConfigField("String", "DESIGN_ITERATION", "\"reference\"")
         }
@@ -152,6 +151,7 @@ android {
 
     buildTypes {
         getByName("release") {
+            manifestPlaceholders["appLabel"] = "iDeviceRestore"
             if (!releaseKeystorePath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }
