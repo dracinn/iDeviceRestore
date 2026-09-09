@@ -72,6 +72,14 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         val titleView = findViewById<TextView?>(R.id.deviceDisplayName)
         val identifierView = findViewById<TextView?>(R.id.deviceIdentifierText)
 
+        // Keep the process-local log snapshot current so Share Logs in Settings exports the actual
+        // activity/probe session even though those backing TextViews are hidden by the new shell.
+        val activityLog = findViewById<TextView?>(R.id.logView)?.text
+        val probeLog = findViewById<TextView?>(R.id.probeLogView)?.text
+        if (activityLog != null || probeLog != null) {
+            SessionLogSnapshotStore.update(activityLog, probeLog)
+        }
+
         val primary = status.substringBefore(" — ").trim()
         val match = Regex("^(.*) \\(([^()]+)\\)$").matchEntire(primary)
         if (match != null) {
