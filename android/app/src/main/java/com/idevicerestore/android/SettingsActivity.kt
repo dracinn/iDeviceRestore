@@ -4,7 +4,11 @@ import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
+import android.view.View
+import android.widget.EditText
 import android.widget.RadioButton
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
@@ -24,9 +28,20 @@ class SettingsActivity : AppCompatActivity() {
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.downloadDirectoryText.text = firmwareStorage.projectRoot.absolutePath
+        refreshStoragePath()
         binding.appVersionText.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
         updateAria2ConnectionValue()
+
+        // The reference layout predates a stable row id. Resolve the containing row from the
+        // bound path label so existing installs/layouts gain a functional directory control without
+        // introducing another visual-only setting.
+        val downloadDirectoryRow = binding.downloadDirectoryText.parent?.parent as? View
+        downloadDirectoryRow?.apply {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showDownloadDirectoryChooser() }
+        }
+        binding.downloadDirectoryText.setOnClickListener { showDownloadDirectoryChooser() }
 
         binding.automaticDeviceDetectionSwitch.isChecked = appSettings.automaticDeviceDetection
         binding.automaticDeviceDetectionSwitch.setOnCheckedChangeListener { _, checked ->
@@ -80,6 +95,75 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(this, BootDiagnosticsActivity::class.java))
         }
         binding.doneButton.setOnClickListener { finish() }
+    }
+
+    private fun showDownloadDirectoryChooser() {
+        if (!firmwareStorage.hasSharedStorageAccess()) {
+            AlertDialog.Builder(this)
+                .setTitle("Storage access required")
+                .setMessage("Grant All files access from the main app before changing the firmware download directory.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        if (FirmwareDownloadService.isDownloadActive()) {
+            AlertDialog.Builder(this)
+                .setTitle("Firmware download active")
+                .setMessage("Finish or cancel the active firmware download before moving the download directory.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val input = EditText(this).apply {
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(appSettings.projectFolderName)
+            setSelection(text.length)
+            hint = AppSettings.DEFAULT_PROJECT_FOLDER_NAME
+            setPadding(48, 12, 48, 12)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Default Download Directory")
+            .setMessage("Choose the top-level folder name on primary shared storage. Existing iDeviceRestore data will be moved by rename when possible.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Move", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val requested = input.text?.toString().orEmpty()
+                val sanitized = AppSettings.sanitizeProjectFolderName(requested)
+                val result = runCatching { firmwareStorage.migrateProjectRootFolder(sanitized) }
+                    .getOrElse { error ->
+                        AlertDialog.Builder(this)
+                            .setTitle("Could not move folder")
+                            .setMessage(error.message ?: error.javaClass.simpleName)
+                            .setPositiveButton("OK", null)
+                            .show()
+                        return@setOnClickListener
+                    }
+
+                if (result.success) {
+                    refreshStoragePath()
+                    Toast.makeText(this, result.message, Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Could not move folder")
+                        .setMessage(result.message)
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun refreshStoragePath() {
+        binding.downloadDirectoryText.text = firmwareStorage.projectRoot.absolutePath
     }
 
     private fun showAria2ConnectionsChooser() {
