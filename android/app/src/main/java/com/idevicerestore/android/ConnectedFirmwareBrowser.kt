@@ -35,12 +35,10 @@ object ConnectedFirmwareBrowser {
         val screen = root.findViewById<ScrollView?>(R.id.screenFirmware) ?: return
         val content = screen.getChildAt(0) as? LinearLayout ?: return
 
-        // Remove the reference mockup's global search, platform filters, and sample device rows.
-        // Their positions are stable in activity_main.xml: header/subtitle first, then browse UI.
+        // Remove the old global search, platform filters, and sample device rows.
         for (index in 2..4) content.getChildAt(index)?.visibility = View.GONE
 
-        // The old "Available Firmware" section is tied to MainActivity's currently connected
-        // device. Historical rows below own their firmware chooser/download flow instead.
+        // The legacy available-firmware section is tied to MainActivity's current device.
         content.getChildAt(5)?.visibility = View.GONE
         content.getChildAt(6)?.visibility = View.GONE
 
@@ -83,8 +81,15 @@ object ConnectedFirmwareBrowser {
             }
         }
 
-        // Insert directly after the firmware screen subtitle.
         content.addView(container, 2)
+    }
+
+    fun refreshIfVisible(context: Context) {
+        val activity = AndroidUiBridge.activity(context) ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        val screen = activity.findViewById<View?>(R.id.screenFirmware) ?: return
+        if (screen.visibility != View.VISIBLE) return
+        render(activity.window.decorView, activity)
     }
 
     private fun deviceRow(context: Context, entry: ConnectedDeviceHistory.Entry): View {
@@ -303,8 +308,17 @@ object ConnectedFirmwareBrowser {
     }
 
     private fun runOnActivity(context: Context, action: () -> Unit) {
-        val activity = AndroidUiBridge.activity(context)
-        if (activity != null) activity.runOnUiThread(action)
+        val original = AndroidUiBridge.activity(context) ?: return
+        if (original.isFinishing || original.isDestroyed) return
+        if (IDeviceRestoreApplication.currentActivityOrNull() !== original) return
+        original.runOnUiThread {
+            if (!original.isFinishing &&
+                !original.isDestroyed &&
+                IDeviceRestoreApplication.currentActivityOrNull() === original
+            ) {
+                action()
+            }
+        }
     }
 
     private fun dp(context: Context, value: Int): Int =
