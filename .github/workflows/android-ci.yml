@@ -107,6 +107,38 @@ jobs:
               print(f'{flavor}: {item["applicationId"]} {item["versionName"]} -> {item["apk"]}')
           PY
 
+      - name: Build reference release compatibility APK
+        if: steps.changes.outputs.android == 'true'
+        run: gradle -p android --no-daemon --stacktrace assembleReferenceRelease
+
+      - name: Verify reference release compatibility
+        if: steps.changes.outputs.android == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          props = {}
+          for line in Path('android/gradle.properties').read_text().splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  k, v = line.split('=', 1)
+                  props[k.strip()] = v.strip()
+          expected = props['ideviceRestoreVersionName']
+          metadata_path = Path('android/app/build/outputs/apk/reference/release/output-metadata.json')
+          data = json.loads(metadata_path.read_text())
+          elements = data.get('elements') or []
+          if len(elements) != 1:
+              raise SystemExit(f'Expected one reference release APK element, found {len(elements)}')
+          element = elements[0]
+          if str(element.get('versionName', '')).strip() != expected:
+              raise SystemExit(f'Reference release version mismatch: expected {expected!r}, got {element.get("versionName")!r}')
+          apk = metadata_path.parent / element.get('outputFile', '')
+          if not apk.is_file():
+              raise SystemExit(f'Missing reference release APK: {apk}')
+          print(f'Reference release compatible: {apk}')
+          PY
+
       - name: Upload four full-app design APKs
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
