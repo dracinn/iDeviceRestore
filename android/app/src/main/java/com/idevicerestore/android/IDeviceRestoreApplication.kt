@@ -18,6 +18,7 @@ class IDeviceRestoreApplication : Application(), Application.ActivityLifecycleCa
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        appInstance = this
 
         val settings = AppSettings(this)
         val mode = settings.appearanceMode.appCompatNightMode
@@ -72,7 +73,14 @@ class IDeviceRestoreApplication : Application(), Application.ActivityLifecycleCa
     companion object {
         @Volatile
         private var appContext: Context? = null
+        @Volatile
+        private var appInstance: IDeviceRestoreApplication? = null
 
         fun contextOrNull(): Context? = appContext
+
+        fun currentActivityOrNull(): Activity? = appInstance
+            ?.resumedActivity
+            ?.get()
+            ?.takeIf { !it.isFinishing && !it.isDestroyed }
     }
 }
