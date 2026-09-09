@@ -9,7 +9,6 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -19,8 +18,8 @@ import com.google.android.material.button.MaterialButton
  * Root layout for the reference-matched Android shell.
  *
  * System-bar insets are applied here so the visible hierarchy can stay faithful to the supplied
- * mockup. Presentation-only controls may be non-interactive, but they intentionally keep their
- * normal visual opacity so disabled implementation state does not distort the reference design.
+ * mockup. Presentation-only controls may be non-interactive, but wired application settings remain
+ * fully interactive.
  */
 class InsetAwareShellLayout @JvmOverloads constructor(
     context: Context,
@@ -137,16 +136,6 @@ class InsetAwareShellLayout @JvmOverloads constructor(
                 view.isEnabled = false
                 view.hint = "Search devices (e.g. MacBookAir10,1)"
                 view.alpha = 1f
-            }
-
-            is SwitchCompat -> when (view.text?.toString()) {
-                "Automatically detect devices",
-                "Check for app updates at launch",
-                "Use verbose logging",
-                "Organize firmware by device" -> {
-                    view.isEnabled = false
-                    view.alpha = 1f
-                }
             }
 
             is CheckBox -> when (view.text?.toString()) {
