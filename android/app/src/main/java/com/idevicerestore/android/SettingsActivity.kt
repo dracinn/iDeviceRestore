@@ -2,12 +2,16 @@ package com.idevicerestore.android
 
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.widget.RadioButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import com.idevicerestore.android.databinding.ActivitySettingsBinding
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
@@ -62,18 +66,37 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        binding.shareLogsButton.setOnClickListener {
-            startActivity(
-                Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                    .putExtra(MainActivity.EXTRA_SHARE_LOGS, true)
-            )
-            finish()
-        }
+        binding.shareLogsButton.setOnClickListener { shareSettingsReport() }
         binding.openBootDiagnosticsButton.setOnClickListener {
             startActivity(Intent(this, BootDiagnosticsActivity::class.java))
         }
         binding.doneButton.setOnClickListener { finish() }
+    }
+
+    private fun shareSettingsReport() {
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date())
+        val report = buildString {
+            appendLine("iDeviceRestore diagnostic summary")
+            appendLine("Generated: $timestamp")
+            appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Android: ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
+            appendLine("Host device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("Automatic device detection: ${appSettings.automaticDeviceDetection}")
+            appendLine("Check for app updates at launch: ${appSettings.checkForAppUpdatesAtLaunch}")
+            appendLine("Verbose logging: ${appSettings.verboseLogging}")
+            appendLine("Include beta/RC firmware: ${appSettings.includeBetaFirmware}")
+            appendLine("Organize firmware by device: ${appSettings.organizeFirmwareByDevice}")
+            appendLine("Appearance: ${appSettings.appearanceMode.storedValue}")
+            appendLine("Privacy: ECID and Apple serial number are redacted from shared reports")
+            appendLine("---")
+            appendLine(RestorePreflightEvidenceStore.preflightSummary())
+        }
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "iDeviceRestore diagnostic log")
+            putExtra(Intent.EXTRA_TEXT, AppLogger.redact(report))
+        }
+        startActivity(Intent.createChooser(share, "Share logs"))
     }
 
     private fun updateAppearanceSelectionStyle() {
