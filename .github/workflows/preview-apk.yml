@@ -1,0 +1,30 @@
+name: Build Preview APK
+
+on:
+  push:
+    branches: [ preview-apk-build ]
+    paths:
+      - 'preview-app/**'
+      - '.github/workflows/preview-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build debug APK
+        working-directory: preview-app
+        run: gradle :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iDeviceRestore-Preview-APK
+          path: preview-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
