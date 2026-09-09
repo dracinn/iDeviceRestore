@@ -53,9 +53,10 @@ class AppUpdateChecker(
                 if (!SEMANTIC_RELEASE_REGEX.matches(tag)) continue
                 val releaseUrl = release.optString("html_url").trim()
                 if (releaseUrl.isBlank()) continue
-                latestTag = tag
-                latestUrl = releaseUrl
-                break
+                if (latestTag == null || compareVersions(tag, latestTag) > 0) {
+                    latestTag = tag
+                    latestUrl = releaseUrl
+                }
             }
 
             if (latestTag == null || latestUrl == null) {
