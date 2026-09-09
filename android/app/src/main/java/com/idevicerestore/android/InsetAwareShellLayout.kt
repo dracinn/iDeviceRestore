@@ -9,7 +9,6 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -19,8 +18,8 @@ import com.google.android.material.button.MaterialButton
  * Root layout for the reference-matched Android shell.
  *
  * System-bar insets are applied here so the visible hierarchy can stay faithful to the supplied
- * mockup. Presentation-only controls may be non-interactive, but they intentionally keep their
- * normal visual opacity so disabled implementation state does not distort the reference design.
+ * mockup. Presentation-only controls may be non-interactive, but wired application settings remain
+ * fully interactive.
  */
 class InsetAwareShellLayout @JvmOverloads constructor(
     context: Context,
@@ -36,6 +35,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
     private val referenceStateMirror = object : Runnable {
         override fun run() {
             mirrorReferenceState()
+            syncFirmwareSelectionAffordances()
             if (isAttachedToWindow) postDelayed(this, 350L)
         }
     }
@@ -59,6 +59,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         post {
             normalizePrototypePresentation(this)
             applyNightAwareReferenceSurfaces()
+            wireFirmwareSelectionSurfaces()
             referenceStateMirror.run()
         }
     }
@@ -72,6 +73,14 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         val status = findViewById<TextView?>(R.id.status)?.text?.toString().orEmpty()
         val titleView = findViewById<TextView?>(R.id.deviceDisplayName)
         val identifierView = findViewById<TextView?>(R.id.deviceIdentifierText)
+
+        // Keep the process-local log snapshot current so Share Logs in Settings exports the actual
+        // activity/probe session even though those backing TextViews are hidden by the new shell.
+        val activityLog = findViewById<TextView?>(R.id.logView)?.text
+        val probeLog = findViewById<TextView?>(R.id.probeLogView)?.text
+        if (activityLog != null || probeLog != null) {
+            SessionLogSnapshotStore.update(activityLog, probeLog)
+        }
 
         val primary = status.substringBefore(" — ").trim()
         val match = Regex("^(.*) \\(([^()]+)\\)$").matchEntire(primary)
@@ -131,22 +140,73 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         selectedRow?.setBackgroundColor(ContextCompat.getColor(context, R.color.mock_selected_row))
     }
 
+    /**
+     * The reference firmware screen originally rendered its rows as presentation-only content while
+     * the real catalog chooser lived behind selectFirmwareButton. Make the visible firmware surfaces
+     * delegate to that verified chooser so users can select signed firmware directly from the screen
+     * without duplicating catalog/signing logic.
+     */
+    private fun wireFirmwareSelectionSurfaces() {
+        val selector = findViewById<MaterialButton?>(R.id.selectFirmwareButton) ?: return
+        val openSelector = View.OnClickListener {
+            if (selector.isEnabled) selector.performClick()
+        }
+
+        val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
+        (connectedLabel?.parent?.parent as? View)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select signed firmware for connected device"
+            setOnClickListener(openSelector)
+        }
+
+        findViewById<View?>(R.id.firmwareSection)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select available signed firmware"
+            setOnClickListener(openSelector)
+        }
+
+        findTextView(this) { it.text?.toString() == "See All" }?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Show all available signed firmware"
+            setOnClickListener(openSelector)
+        }
+
+        findViewById<TextView?>(R.id.homeFirmwareSummary)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select signed firmware"
+            setOnClickListener(openSelector)
+        }
+    }
+
+    private fun syncFirmwareSelectionAffordances() {
+        val selector = findViewById<MaterialButton?>(R.id.selectFirmwareButton) ?: return
+        val available = selector.isEnabled
+        val alpha = if (available) 1f else 0.55f
+
+        val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
+        (connectedLabel?.parent?.parent as? View)?.alpha = alpha
+        findTextView(this) { it.text?.toString() == "See All" }?.alpha = alpha
+
+        findViewById<TextView?>(R.id.homeFirmwareSummary)?.let { summary ->
+            summary.alpha = alpha
+            if (!available && summary.text?.toString() == "Select firmware") {
+                summary.contentDescription = "Firmware selection unavailable until a device is identified"
+            } else {
+                summary.contentDescription = "Select signed firmware"
+            }
+        }
+    }
+
     private fun normalizePrototypePresentation(view: View) {
         when (view) {
             is EditText -> if (view.hint?.toString() == "Search devices or builds") {
                 view.isEnabled = false
                 view.hint = "Search devices (e.g. MacBookAir10,1)"
                 view.alpha = 1f
-            }
-
-            is SwitchCompat -> when (view.text?.toString()) {
-                "Automatically detect devices",
-                "Check for app updates at launch",
-                "Use verbose logging",
-                "Organize firmware by device" -> {
-                    view.isEnabled = false
-                    view.alpha = 1f
-                }
             }
 
             is CheckBox -> when (view.text?.toString()) {

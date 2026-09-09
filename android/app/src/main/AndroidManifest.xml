@@ -13,7 +13,7 @@
         android:name=".IDeviceRestoreApplication"
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="iDeviceRestore Lab"
+        android:label="iDeviceRestore"
         android:theme="@style/Theme.IDeviceRestore">
         <service
             android:name=".FirmwareDownloadService"
@@ -29,17 +29,28 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="iDeviceRestore Lab">
+            android:label="iDeviceRestore">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!--
+          A dedicated alias owns USB auto-launch so the Automatically detect devices preference can
+          enable/disable USB attach handling without disabling the launcher activity itself.
+        -->
+        <activity-alias
+            android:name=".UsbAttachActivityAlias"
+            android:enabled="true"
+            android:exported="true"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
             <meta-data
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
-        </activity>
+        </activity-alias>
     </application>
 </manifest>

@@ -30,6 +30,7 @@ class FirmwareDownloadService : Service() {
                 if (active != null) {
                     active.cancel()
                 } else {
+                    downloadActive = false
                     broadcastState(STATE_CANCELLED, message = "Firmware download cancelled")
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -54,6 +55,7 @@ class FirmwareDownloadService : Service() {
         val version = intent.getStringExtra(EXTRA_VERSION).orEmpty()
         val buildId = intent.getStringExtra(EXTRA_BUILD_ID).orEmpty()
         val destination = File(destinationPath)
+        val connectionCount = AppSettings(this).aria2Connections
 
         if (!url.startsWith("https://updates.cdn-apple.com/")) {
             return fail("Firmware payload host is not Apple's CDN")
@@ -101,7 +103,11 @@ class FirmwareDownloadService : Service() {
             STATE_RUNNING,
             downloaded = 0L,
             total = expectedSize,
-            message = "Starting official aria2c Apple CDN download"
+            message = "Starting official aria2c Apple CDN download (${connectionCount} connection${if (connectionCount == 1) "" else "s"})"
+        )
+        broadcastState(
+            STATE_LOG,
+            message = "FirmwareDownloadService: official aria2c segmented/resumable mode connections=$connectionCount"
         )
 
         val downloader = Aria2cFirmwareDownloader(this, logger = { message ->
@@ -112,7 +118,7 @@ class FirmwareDownloadService : Service() {
             destination = destination,
             expectedSize = expectedSize,
             expectedSha1 = expectedSha1,
-            connections = MAX_ARIA2_CONNECTIONS
+            connections = connectionCount
         )
 
         val active = downloader.start(request) { progress ->
@@ -135,6 +141,7 @@ class FirmwareDownloadService : Service() {
             }
         }
         handle = active
+        downloadActive = true
 
         Thread {
             try {
@@ -160,6 +167,7 @@ class FirmwareDownloadService : Service() {
                     broadcastState(STATE_FAILED, message = "${cause.javaClass.simpleName}: ${cause.message}")
                 }
             } finally {
+                downloadActive = false
                 handle = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -235,6 +243,7 @@ class FirmwareDownloadService : Service() {
         .build()
 
     private fun fail(message: String) {
+        downloadActive = false
         broadcastState(STATE_FAILED, message = message)
         stopSelf()
     }
@@ -274,6 +283,7 @@ class FirmwareDownloadService : Service() {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         handle?.cancel()
+        downloadActive = false
         broadcastState(STATE_FAILED, message = "Android foreground data-sync time limit reached; aria2c download can be resumed")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(startId)
@@ -282,6 +292,11 @@ class FirmwareDownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile
+        private var downloadActive = false
+
+        fun isDownloadActive(): Boolean = downloadActive
+
         const val ACTION_START = "com.idevicerestore.android.action.DOWNLOAD_FIRMWARE"
         const val ACTION_CANCEL = "com.idevicerestore.android.action.CANCEL_FIRMWARE_DOWNLOAD"
         const val ACTION_STATE = "com.idevicerestore.android.action.FIRMWARE_DOWNLOAD_STATE"
@@ -307,7 +322,6 @@ class FirmwareDownloadService : Service() {
 
         private const val CHANNEL_ID = "firmware_downloads"
         private const val NOTIFICATION_ID = 4107
-        private const val MAX_ARIA2_CONNECTIONS = 8
 
         fun formatBytes(value: Long): String {
             if (value < 0) return "unknown"

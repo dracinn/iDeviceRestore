@@ -14,6 +14,7 @@ class BootDiagnosticLogger(context: Context) {
     private val lineTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private val sessionStamp = timestamp.format(Date())
     private val rootDirectory: File
+    private val verboseLogging = AppSettings(context).verboseLogging
 
     var sessionDirectory: File
         private set
@@ -36,6 +37,7 @@ class BootDiagnosticLogger(context: Context) {
         sessionLog = File(sessionDirectory, "diagnostic.log")
         usbLog = File(sessionDirectory, "usb-events.log")
         summaryFile = File(sessionDirectory, "summary.txt")
+        log("Verbose logging: ${if (verboseLogging) "enabled" else "disabled"}")
     }
 
     @Synchronized
@@ -73,9 +75,14 @@ class BootDiagnosticLogger(context: Context) {
     }
 
     @Synchronized
+    fun logVerbose(message: String) {
+        if (verboseLogging) append(sessionLog, "VERBOSE: $message")
+    }
+
+    @Synchronized
     fun logUsb(message: String) {
         append(usbLog, message)
-        append(sessionLog, "USB: $message")
+        if (verboseLogging) append(sessionLog, "USB: $message")
     }
 
     @Synchronized
@@ -83,6 +90,7 @@ class BootDiagnosticLogger(context: Context) {
         val text = buildString {
             appendLine("iDeviceRestore Boot Diagnostics")
             appendLine("Generated: ${lineTimestamp.format(Date())}")
+            appendLine("Verbose logging: ${if (verboseLogging) "enabled" else "disabled"}")
             appendLine("State: ${snapshot.state}")
             appendLine("Device: ${snapshot.deviceDescription ?: "none"}")
             snapshot.recovery?.readiness?.let { readiness ->
@@ -99,7 +107,7 @@ class BootDiagnosticLogger(context: Context) {
             } else {
                 snapshot.tests.forEach { test ->
                     appendLine("- [${test.status}] ${test.id}: ${test.title}")
-                    appendLine("  ${test.detail}")
+                    if (verboseLogging) appendLine("  ${test.detail}")
                 }
             }
             appendLine()
@@ -113,10 +121,12 @@ class BootDiagnosticLogger(context: Context) {
                     finding.recommendation?.let { appendLine("  Recommendation: $it") }
                 }
             }
-            appendLine()
-            appendLine("Timeline")
-            snapshot.events.forEach { event ->
-                appendLine("- ${event.timestamp}: ${event.state}: ${event.message}")
+            if (verboseLogging) {
+                appendLine()
+                appendLine("Timeline")
+                snapshot.events.forEach { event ->
+                    appendLine("- ${event.timestamp}: ${event.state}: ${event.message}")
+                }
             }
         }
         summaryFile.writeText(text)
