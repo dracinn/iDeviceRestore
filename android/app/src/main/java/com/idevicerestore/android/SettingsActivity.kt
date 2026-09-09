@@ -18,6 +18,31 @@ class SettingsActivity : AppCompatActivity() {
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        binding.automaticDeviceDetectionSwitch.isChecked = appSettings.automaticDeviceDetection
+        binding.automaticDeviceDetectionSwitch.setOnCheckedChangeListener { _, checked ->
+            appSettings.automaticDeviceDetection = checked
+        }
+
+        binding.checkForUpdatesSwitch.isChecked = appSettings.checkForAppUpdatesAtLaunch
+        binding.checkForUpdatesSwitch.setOnCheckedChangeListener { _, checked ->
+            appSettings.checkForAppUpdatesAtLaunch = checked
+        }
+
+        binding.verboseLoggingSwitch.isChecked = appSettings.verboseLogging
+        binding.verboseLoggingSwitch.setOnCheckedChangeListener { _, checked ->
+            appSettings.verboseLogging = checked
+        }
+
+        binding.includeBetaFirmwareSwitch.isChecked = appSettings.includeBetaFirmware
+        binding.includeBetaFirmwareSwitch.setOnCheckedChangeListener { _, checked ->
+            appSettings.includeBetaFirmware = checked
+        }
+
+        binding.organizeFirmwareByDeviceSwitch.isChecked = appSettings.organizeFirmwareByDevice
+        binding.organizeFirmwareByDeviceSwitch.setOnCheckedChangeListener { _, checked ->
+            appSettings.organizeFirmwareByDevice = checked
+        }
+
         when (appSettings.appearanceMode) {
             AppSettings.AppearanceMode.SYSTEM -> binding.appearanceSystemRadio.isChecked = true
             AppSettings.AppearanceMode.LIGHT -> binding.appearanceLightRadio.isChecked = true
@@ -37,9 +62,13 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        binding.includeBetaFirmwareSwitch.isChecked = appSettings.includeBetaFirmware
-        binding.includeBetaFirmwareSwitch.setOnCheckedChangeListener { _, checked ->
-            appSettings.includeBetaFirmware = checked
+        binding.shareLogsButton.setOnClickListener {
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(MainActivity.EXTRA_SHARE_LOGS, true)
+            )
+            finish()
         }
         binding.openBootDiagnosticsButton.setOnClickListener {
             startActivity(Intent(this, BootDiagnosticsActivity::class.java))
