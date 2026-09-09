@@ -58,6 +58,7 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         post {
             normalizePrototypePresentation(this)
             applyNightAwareReferenceSurfaces()
+            wireFirmwareSelectionSurfaces()
             referenceStateMirror.run()
         }
     }
@@ -136,6 +137,48 @@ class InsetAwareShellLayout @JvmOverloads constructor(
         val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
         val selectedRow = connectedLabel?.parent?.parent as? View
         selectedRow?.setBackgroundColor(ContextCompat.getColor(context, R.color.mock_selected_row))
+    }
+
+    /**
+     * The reference firmware screen originally rendered its rows as presentation-only content while
+     * the real catalog chooser lived behind selectFirmwareButton. Make the visible firmware surfaces
+     * delegate to that verified chooser so users can select signed firmware directly from the screen
+     * without duplicating catalog/signing logic.
+     */
+    private fun wireFirmwareSelectionSurfaces() {
+        val selector = findViewById<MaterialButton?>(R.id.selectFirmwareButton) ?: return
+        val openSelector = View.OnClickListener {
+            if (selector.isEnabled) selector.performClick()
+        }
+
+        val connectedLabel = findTextView(this) { it.text?.toString() == "Connected Mac" }
+        (connectedLabel?.parent?.parent as? View)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select signed firmware for connected device"
+            setOnClickListener(openSelector)
+        }
+
+        findViewById<View?>(R.id.firmwareSection)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select available signed firmware"
+            setOnClickListener(openSelector)
+        }
+
+        findTextView(this) { it.text?.toString() == "See All" }?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Show all available signed firmware"
+            setOnClickListener(openSelector)
+        }
+
+        findViewById<TextView?>(R.id.homeFirmwareSummary)?.apply {
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Select signed firmware"
+            setOnClickListener(openSelector)
+        }
     }
 
     private fun normalizePrototypePresentation(view: View) {
