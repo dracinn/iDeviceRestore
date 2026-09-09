@@ -50,11 +50,11 @@ class FirmwareReferenceView(context: Context) : LinearLayout(context) {
     }
 
     private fun addSearch() {
+        val radius = dp(12).toFloat()
         val box = TextInputLayout(context).apply {
             boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
-            boxBackgroundColor = surface
-            boxCornerRadiusTopStart = dp(12).toFloat(); boxCornerRadiusTopEnd = dp(12).toFloat()
-            boxCornerRadiusBottomStart = dp(12).toFloat(); boxCornerRadiusBottomEnd = dp(12).toFloat()
+            setBoxBackgroundColor(surface)
+            setBoxCornerRadii(radius, radius, radius, radius)
             setBoxStrokeColorStateList(android.content.res.ColorStateList.valueOf(separator))
             hint = "Search devices (e.g. MacBookAir10,1)"
             hintTextColor = android.content.res.ColorStateList.valueOf(textSecondary)
@@ -156,7 +156,18 @@ class FirmwareReferenceView(context: Context) : LinearLayout(context) {
     private fun delegate(id: Int) { rootView.findViewById<View?>(id)?.performClick() }
     private fun card() = MaterialCardView(context).apply { radius = dp(12).toFloat(); cardElevation = 0f; setCardBackgroundColor(surface); strokeColor = separator; strokeWidth = dp(1) }
     private fun label(value: String, size: Float, bold: Boolean) = TextView(context).apply { text = value; textSize = size; setTextColor(if (bold) textPrimary else textSecondary); if (bold) setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER_VERTICAL }
-    private fun iconButton(icon: Int, description: String, click: () -> Unit) = MaterialButton(context).apply { text = ""; contentDescription = description; icon = ContextCompat.getDrawable(context, icon); iconTint = android.content.res.ColorStateList.valueOf(textPrimary); iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START; iconPadding = 0; minWidth = 0; minimumWidth = 0; setBackgroundColor(android.graphics.Color.TRANSPARENT); setOnClickListener { click() } }
+    private fun iconButton(iconRes: Int, description: String, click: () -> Unit) = MaterialButton(context).apply {
+        text = ""
+        contentDescription = description
+        setIcon(ContextCompat.getDrawable(context, iconRes))
+        iconTint = android.content.res.ColorStateList.valueOf(textPrimary)
+        iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+        iconPadding = 0
+        minWidth = 0
+        minimumWidth = 0
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        setOnClickListener { click() }
+    }
     private fun color(id: Int) = ContextCompat.getColor(context, id)
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
