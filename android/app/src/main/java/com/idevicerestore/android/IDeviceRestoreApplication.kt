@@ -2,6 +2,7 @@ package com.idevicerestore.android
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -16,6 +17,8 @@ class IDeviceRestoreApplication : Application(), Application.ActivityLifecycleCa
 
     override fun onCreate() {
         super.onCreate()
+        appContext = applicationContext
+
         val settings = AppSettings(this)
         val mode = settings.appearanceMode.appCompatNightMode
         if (AppCompatDelegate.getDefaultNightMode() != mode) {
@@ -65,4 +68,11 @@ class IDeviceRestoreApplication : Application(), Application.ActivityLifecycleCa
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
     override fun onActivityDestroyed(activity: Activity) = Unit
+
+    companion object {
+        @Volatile
+        private var appContext: Context? = null
+
+        fun contextOrNull(): Context? = appContext
+    }
 }
