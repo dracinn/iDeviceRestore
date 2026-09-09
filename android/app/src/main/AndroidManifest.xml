@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
     <application
@@ -15,19 +16,43 @@
         android:extractNativeLibs="true"
         android:label="${appLabel}"
         android:theme="@style/Theme.IDeviceRestore">
-        <service android:name=".FirmwareDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".FirmwareDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <activity android:name=".LogsActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
-        <activity android:name=".BootDiagnosticsActivity" android:exported="false" android:label="${appLabel} Boot Diagnostics" android:taskAffinity="${applicationId}.bootdiagnostics" />
-        <activity android:name=".MainActivity" android:exported="true" android:label="${appLabel}">
+        <activity
+            android:name=".BootDiagnosticsActivity"
+            android:exported="false"
+            android:label="${appLabel} Boot Diagnostics"
+            android:taskAffinity="${applicationId}.bootdiagnostics" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="${appLabel}">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity-alias android:name=".UsbAttachActivityAlias" android:enabled="true" android:exported="true" android:targetActivity=".MainActivity">
-            <intent-filter><action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" /></intent-filter>
-            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/device_filter" />
+
+        <!--
+          A dedicated alias owns USB auto-launch so the Automatically detect devices preference can
+          enable/disable USB attach handling without disabling the launcher activity itself.
+        -->
+        <activity-alias
+            android:name=".UsbAttachActivityAlias"
+            android:enabled="true"
+            android:exported="true"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity-alias>
     </application>
 </manifest>
