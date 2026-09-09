@@ -5,10 +5,16 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.util.AttributeSet
 import android.view.View
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 
-/** Presentation-only routing for the reference-matched shell. */
+/**
+ * Interaction layer for the approved Android mockup.
+ *
+ * The visible controls are intentionally presentation-first. Existing app functions live behind
+ * these controls as delegates so functional wiring never changes the mockup's layout or styling.
+ */
 class MockupNavigationButton @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -23,10 +29,53 @@ class MockupNavigationButton @JvmOverloads constructor(
         when (action) {
             ACTION_HOME -> showScreen(R.id.screenHome, ACTION_HOME)
             ACTION_FIRMWARE, ACTION_UPDATE -> showScreen(R.id.screenFirmware, ACTION_FIRMWARE)
-            ACTION_DEVICES -> showScreen(R.id.screenDevices, ACTION_DEVICES)
-            ACTION_TOOLS -> showScreen(R.id.screenTools, ACTION_TOOLS)
-            ACTION_DIAGNOSTICS, ACTION_BOOT_DIAGNOSTICS -> openBootDiagnostics()
-            ACTION_RESTORE -> Unit
+            ACTION_RESTORE -> showScreen(R.id.screenRestore, ACTION_RESTORE)
+            ACTION_DEVICES -> showScreen(R.id.screenDiagnostics, ACTION_DEVICES)
+            ACTION_DIAGNOSTICS -> showScreen(R.id.screenDiagnostics, null)
+            ACTION_MORE, ACTION_TOOLS -> showScreen(R.id.screenTools, ACTION_MORE)
+            ACTION_RUN_DIAGNOSTICS, ACTION_BOOT_DIAGNOSTICS -> openBootDiagnostics()
+            ACTION_CHANGE_MODE -> delegateClick(R.id.dfuGuideDelegateButton, "Connect a device in Recovery to change mode")
+            ACTION_FIRMWARE_SELECT -> delegateClick(R.id.selectFirmwareButton, "Identify a connected device before selecting firmware")
+            ACTION_FIRMWARE_ACTION -> runFirmwareAction()
+            ACTION_RESTORE_CONTINUE -> continueRestoreFlow()
+        }
+    }
+
+    private fun runFirmwareAction() {
+        val download = rootView.findViewById<View?>(R.id.downloadFirmwareButton)
+        if (download?.isEnabled == true) {
+            download.performClick()
+        } else {
+            delegateClick(R.id.selectFirmwareButton, "Choose signed firmware before downloading")
+        }
+    }
+
+    private fun continueRestoreFlow() {
+        val restore = rootView.findViewById<View?>(R.id.startRestoreDelegateButton)
+        if (restore?.isEnabled == true) {
+            restore.performClick()
+            return
+        }
+
+        val selector = rootView.findViewById<View?>(R.id.selectFirmwareButton)
+        if (selector?.isEnabled == true) {
+            selector.performClick()
+            return
+        }
+
+        Toast.makeText(
+            context,
+            "Connect and identify a supported Apple device before continuing",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun delegateClick(viewId: Int, unavailableMessage: String) {
+        val delegate = rootView.findViewById<View?>(viewId)
+        if (delegate?.isEnabled == true) {
+            delegate.performClick()
+        } else {
+            Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -52,7 +101,7 @@ class MockupNavigationButton @JvmOverloads constructor(
         val secondary = ContextCompat.getColor(context, R.color.mock_text_secondary)
         NAV_BUTTON_IDS.forEach { id ->
             val button = rootView.findViewById<MaterialButton?>(id) ?: return@forEach
-            val selected = button.tag?.toString() == selectedAction
+            val selected = selectedAction != null && button.tag?.toString() == selectedAction
             val tint = ColorStateList.valueOf(if (selected) primary else secondary)
             button.setTextColor(tint)
             button.iconTint = tint
@@ -65,22 +114,30 @@ class MockupNavigationButton @JvmOverloads constructor(
         private const val ACTION_DEVICES = "devices"
         private const val ACTION_FIRMWARE = "firmware"
         private const val ACTION_UPDATE = "update"
-        private const val ACTION_TOOLS = "tools"
         private const val ACTION_RESTORE = "restore"
         private const val ACTION_DIAGNOSTICS = "diagnostics"
+        private const val ACTION_MORE = "more"
+        private const val ACTION_TOOLS = "tools"
         private const val ACTION_BOOT_DIAGNOSTICS = "boot_diagnostics"
+        private const val ACTION_RUN_DIAGNOSTICS = "run_diagnostics"
+        private const val ACTION_CHANGE_MODE = "change_mode"
+        private const val ACTION_FIRMWARE_SELECT = "firmware_select"
+        private const val ACTION_FIRMWARE_ACTION = "firmware_action"
+        private const val ACTION_RESTORE_CONTINUE = "restore_continue"
 
         private val SCREEN_IDS = intArrayOf(
             R.id.screenHome,
             R.id.screenFirmware,
-            R.id.screenDevices,
+            R.id.screenRestore,
+            R.id.screenDiagnostics,
             R.id.screenTools
         )
         private val NAV_BUTTON_IDS = intArrayOf(
             R.id.navHomeButton,
-            R.id.navFirmwareButton,
             R.id.navDevicesButton,
-            R.id.navToolsButton
+            R.id.navFirmwareButton,
+            R.id.navRestoreButton,
+            R.id.navMoreButton
         )
     }
 }
