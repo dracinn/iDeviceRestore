@@ -121,28 +121,8 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: |
-            set -eu
-            for flavor in reference compact comfort minimal; do
-              apk="android/app/build/outputs/apk/${flavor}/debug/app-${flavor}-debug.apk"
-              echo "Testing $flavor -> $apk"
-              adb install -r "$apk"
-              adb logcat -c
-              adb shell am force-stop com.idevicerestore.android
-              adb shell am start -W -n com.idevicerestore.android/.MainActivity
-              sleep 5
-              if ! adb shell pidof com.idevicerestore.android >/dev/null; then
-                echo "Startup failure for $flavor"
-                adb logcat -d -t 300
-                exit 1
-              fi
-              if adb logcat -d -t 300 | grep -q "FATAL EXCEPTION: main"; then
-                echo "Main-thread crash detected for $flavor"
-                adb logcat -d -t 300
-                exit 1
-              fi
-              adb shell am force-stop com.idevicerestore.android
-            done
+          script: >-
+            bash -lc 'set -eu; for flavor in reference compact comfort minimal; do apk="android/app/build/outputs/apk/${flavor}/debug/app-${flavor}-debug.apk"; echo "Testing ${flavor} -> ${apk}"; adb install -r "${apk}"; adb logcat -c; adb shell am force-stop com.idevicerestore.android; adb shell am start -W -n com.idevicerestore.android/.MainActivity; sleep 5; if ! adb shell pidof com.idevicerestore.android >/dev/null; then echo "Startup failure for ${flavor}"; adb logcat -d -t 300; exit 1; fi; if adb logcat -d -t 300 | grep -q "FATAL EXCEPTION: main"; then echo "Main-thread crash detected for ${flavor}"; adb logcat -d -t 300; exit 1; fi; adb shell am force-stop com.idevicerestore.android; done'
 
       - name: Upload four full-app design APKs
         if: steps.changes.outputs.android == 'true'
