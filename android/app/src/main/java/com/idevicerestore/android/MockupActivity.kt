@@ -1,18 +1,26 @@
 package com.idevicerestore.android
 
 import android.os.Bundle
+import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 
-/**
- * Clean presentation entry point for the mockup-first rebuild.
- *
- * This activity intentionally has no USB, firmware, restore, download, or diagnostic dependencies.
- * Those capabilities remain in the existing core and will only be connected after the five-screen
- * visual shell has been reviewed and approved.
- */
+/** Presentation-only shell for matching the approved mockup before backend integration. */
 class MockupActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showHome()
+    }
+
+    private fun showHome() {
         setContentView(R.layout.activity_mockup)
+        findViewById<View>(R.id.mockFirmware).setOnClickListener { showFirmware() }
+        findViewById<View>(R.id.mockSettings).setOnClickListener { /* Settings screen follows in UI pass. */ }
+        findViewById<View>(R.id.mockRestore).setOnClickListener { /* Restore screen follows in UI pass. */ }
+        findViewById<View>(R.id.mockDiagnostics).setOnClickListener { /* Diagnostics screen follows in UI pass. */ }
+    }
+
+    private fun showFirmware() {
+        setContentView(R.layout.screen_firmware_mockup)
+        findViewById<View>(R.id.firmwareHome).setOnClickListener { showHome() }
     }
 }
