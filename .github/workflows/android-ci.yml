@@ -52,11 +52,11 @@ jobs:
         with:
           gradle-version: '8.14.5'
 
-      - name: Build four complete design iterations
+      - name: Build debug APK
         if: steps.changes.outputs.android == 'true'
         run: gradle -p android --no-daemon --stacktrace assembleDebug
 
-      - name: Verify full-app APK variants
+      - name: Verify debug APK
         if: steps.changes.outputs.android == 'true'
         shell: bash
         run: |
@@ -70,48 +70,39 @@ jobs:
               if '=' in line and not line.lstrip().startswith('#'):
                   k, v = line.split('=', 1)
                   props[k.strip()] = v.strip()
-          base_version = props['ideviceRestoreVersionName']
-          m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', base_version)
+          expected_name = props['ideviceRestoreVersionName']
+          m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', expected_name)
           if not m:
-              raise SystemExit(f'Invalid semantic version {base_version!r}')
+              raise SystemExit(f'Invalid semantic version {expected_name!r}')
           major, minor, patch = map(int, m.groups())
           expected_code = major * 1_000_000 + minor * 1_000 + patch
-          expected_flavors = {'reference', 'compact', 'comfort', 'minimal'}
-          found = {}
-          for metadata_path in Path('android/app/build/outputs/apk').glob('*/debug/output-metadata.json'):
-              flavor = metadata_path.parent.parent.name
-              data = json.loads(metadata_path.read_text())
-              elements = data.get('elements') or []
-              if len(elements) != 1:
-                  raise SystemExit(f'{metadata_path}: expected one APK element')
-              element = elements[0]
-              found[flavor] = {
-                  'applicationId': data.get('applicationId'),
-                  'versionName': str(element.get('versionName', '')),
-                  'versionCode': int(element.get('versionCode', -1)),
-                  'apk': str(metadata_path.parent / element.get('outputFile', '')),
-              }
-          if set(found) != expected_flavors:
-              raise SystemExit(f'Expected flavors {sorted(expected_flavors)}, found {sorted(found)}')
-          for flavor in sorted(expected_flavors):
-              item = found[flavor]
-              if item['applicationId'] != 'com.idevicerestore.android':
-                  raise SystemExit(f'{flavor}: package mismatch {item["applicationId"]!r}')
-              expected_name = base_version if flavor == 'reference' else f'{base_version}-{flavor}'
-              if item['versionName'] != expected_name:
-                  raise SystemExit(f'{flavor}: versionName mismatch {item["versionName"]!r}; expected {expected_name!r}')
-              if item['versionCode'] != expected_code:
-                  raise SystemExit(f'{flavor}: versionCode mismatch {item["versionCode"]}')
-              if not Path(item['apk']).is_file():
-                  raise SystemExit(f'{flavor}: missing APK {item["apk"]}')
-              print(f'{flavor}: {item["applicationId"]} {item["versionName"]} -> {item["apk"]}')
+
+          candidates = list(Path('android/app/build/outputs/apk').glob('**/debug/output-metadata.json'))
+          if len(candidates) != 1:
+              raise SystemExit(f'Expected one debug APK metadata file, found {len(candidates)}: {candidates}')
+          metadata_path = candidates[0]
+          data = json.loads(metadata_path.read_text())
+          elements = data.get('elements') or []
+          if len(elements) != 1:
+              raise SystemExit(f'{metadata_path}: expected one APK element')
+          element = elements[0]
+          if data.get('applicationId') != 'com.idevicerestore.android':
+              raise SystemExit(f'Package mismatch: {data.get("applicationId")!r}')
+          if str(element.get('versionName', '')) != expected_name:
+              raise SystemExit(f'Version name mismatch: {element.get("versionName")!r}; expected {expected_name!r}')
+          if int(element.get('versionCode', -1)) != expected_code:
+              raise SystemExit(f'Version code mismatch: {element.get("versionCode")!r}; expected {expected_code}')
+          apk = metadata_path.parent / element.get('outputFile', '')
+          if not apk.is_file():
+              raise SystemExit(f'Missing debug APK: {apk}')
+          print(f'Debug APK verified: {apk}')
           PY
 
-      - name: Build reference release compatibility APK
+      - name: Build release compatibility APK
         if: steps.changes.outputs.android == 'true'
-        run: gradle -p android --no-daemon --stacktrace assembleReferenceRelease
+        run: gradle -p android --no-daemon --stacktrace assembleRelease
 
-      - name: Verify reference release compatibility
+      - name: Verify release compatibility
         if: steps.changes.outputs.android == 'true'
         shell: bash
         run: |
@@ -125,26 +116,29 @@ jobs:
                   k, v = line.split('=', 1)
                   props[k.strip()] = v.strip()
           expected = props['ideviceRestoreVersionName']
-          metadata_path = Path('android/app/build/outputs/apk/reference/release/output-metadata.json')
+          candidates = list(Path('android/app/build/outputs/apk').glob('**/release/output-metadata.json'))
+          if len(candidates) != 1:
+              raise SystemExit(f'Expected one release APK metadata file, found {len(candidates)}: {candidates}')
+          metadata_path = candidates[0]
           data = json.loads(metadata_path.read_text())
           elements = data.get('elements') or []
           if len(elements) != 1:
-              raise SystemExit(f'Expected one reference release APK element, found {len(elements)}')
+              raise SystemExit(f'Expected one release APK element, found {len(elements)}')
           element = elements[0]
           if str(element.get('versionName', '')).strip() != expected:
-              raise SystemExit(f'Reference release version mismatch: expected {expected!r}, got {element.get("versionName")!r}')
+              raise SystemExit(f'Release version mismatch: expected {expected!r}, got {element.get("versionName")!r}')
           apk = metadata_path.parent / element.get('outputFile', '')
           if not apk.is_file():
-              raise SystemExit(f'Missing reference release APK: {apk}')
-          print(f'Reference release compatible: {apk}')
+              raise SystemExit(f'Missing release APK: {apk}')
+          print(f'Release compatible: {apk}')
           PY
 
-      - name: Upload four full-app design APKs
+      - name: Upload debug APK
         if: steps.changes.outputs.android == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: iDeviceRestore-four-full-app-designs
-          path: android/app/build/outputs/apk/*/debug/*.apk
+          name: iDeviceRestore-debug-apk
+          path: android/app/build/outputs/apk/**/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
