@@ -22,7 +22,7 @@ class MockupActivity : AppCompatActivity() {
 
     private fun showFirmware() {
         setContentView(R.layout.screen_firmware_mockup)
-        findViewById<View>(R.id.firmwareHome).setOnClickListener { showHome() }
+        bindSharedNav(active = NavItem.FIRMWARE)
     }
 
     private fun showRestore() {
