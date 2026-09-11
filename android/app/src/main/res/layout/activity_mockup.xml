@@ -1,8 +1,294 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/ui_background" android:orientation="vertical">
-<ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true" android:overScrollMode="never"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingStart="@dimen/ui_screen_horizontal" android:paddingTop="14dp" android:paddingEnd="@dimen/ui_screen_horizontal" android:paddingBottom="12dp">
-<LinearLayout android:layout_width="match_parent" android:layout_height="58dp" android:gravity="center_vertical" android:orientation="horizontal"><Space android:layout_width="40dp" android:layout_height="1dp"/><LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/ui_text" android:textSize="19sp" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Your Apple device. In good hands." android:textColor="@color/ui_text_secondary" android:textSize="11sp"/></LinearLayout><ImageButton android:id="@+id/mockSettings" android:layout_width="40dp" android:layout_height="40dp" android:background="@android:color/transparent" android:contentDescription="Settings" android:padding="9dp" android:src="@drawable/ic_settings" app:tint="@color/ui_text"/></LinearLayout>
-<com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/ui_surface" app:cardCornerRadius="@dimen/ui_card_radius" app:cardElevation="0dp" app:strokeColor="@color/ui_border" app:strokeWidth="1dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="13dp"><TextView android:layout_width="wrap_content" android:layout_height="24dp" android:layout_gravity="end" android:background="@drawable/mock_reference_status_pill" android:gravity="center" android:paddingStart="9dp" android:paddingEnd="9dp" android:text="●  Recovery Mode" android:textColor="@color/ui_success" android:textSize="10sp"/><ImageView android:layout_width="145dp" android:layout_height="94dp" android:layout_gravity="center_horizontal" android:contentDescription="MacBook Air" android:scaleType="fitCenter" android:src="@drawable/mock_asset_macbook"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:text="MacBook Air (M1, Late 2020)" android:textColor="@color/ui_text" android:textSize="16sp" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="2dp" android:text="MacBookAir10,1" android:textColor="@color/ui_text_secondary" android:textSize="11sp"/><View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="13dp" android:background="@color/ui_border"/>
-<LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal"><TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Mode" android:textColor="@color/ui_text_secondary" android:textSize="12sp"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="●  Recovery Mode" android:textColor="@color/ui_success" android:textSize="12sp"/></LinearLayout><LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal"><TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="ECID" android:textColor="@color/ui_text_secondary" android:textSize="12sp"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0x1C2E5A9B3D1E" android:textColor="@color/ui_text" android:textSize="12sp"/></LinearLayout><LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal"><TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Serial" android:textColor="@color/ui_text_secondary" android:textSize="12sp"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="FVFDP3Q1LMNH" android:textColor="@color/ui_text" android:textSize="12sp"/></LinearLayout><LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal"><TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Latest Signed" android:textColor="@color/ui_text_secondary" android:textSize="12sp"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="26.6.2 (25G83)" android:textColor="@color/ui_text" android:textSize="12sp"/></LinearLayout><com.google.android.material.button.MaterialButton android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="8dp" android:text="View Device Details   ›" android:textAllCaps="false" android:textColor="@color/ui_text" app:backgroundTint="@color/ui_surface_soft" app:cornerRadius="10dp"/></LinearLayout></com.google.android.material.card.MaterialCardView>
-<GridLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:columnCount="2" android:rowCount="2"><com.google.android.material.card.MaterialCardView android:id="@+id/mockRestore" android:layout_width="0dp" android:layout_height="112dp" android:layout_columnWeight="1" android:layout_marginEnd="5dp" android:layout_marginBottom="5dp" app:cardBackgroundColor="@color/ui_surface" app:cardCornerRadius="@dimen/ui_card_radius" app:cardElevation="0dp"><LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:orientation="vertical"><FrameLayout android:layout_width="46dp" android:layout_height="46dp" android:background="@drawable/mock_icon_circle"><ImageView android:layout_width="24dp" android:layout_height="24dp" android:layout_gravity="center" android:src="@drawable/ic_action_restore"/></FrameLayout><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Restore" android:textColor="@color/ui_text" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reinstall macOS" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout></com.google.android.material.card.MaterialCardView><com.google.android.material.card.MaterialCardView android:layout_width="0dp" android:layout_height="112dp" android:layout_columnWeight="1" android:layout_marginStart="5dp" android:layout_marginBottom="5dp" app:cardBackgroundColor="@color/ui_surface" app:cardCornerRadius="@dimen/ui_card_radius" app:cardElevation="0dp"><LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:orientation="vertical"><FrameLayout android:layout_width="46dp" android:layout_height="46dp" android:background="@drawable/mock_icon_circle"><ImageView android:layout_width="24dp" android:layout_height="24dp" android:layout_gravity="center" android:src="@drawable/ic_action_update"/></FrameLayout><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Update" android:textColor="@color/ui_text" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Install latest signed" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout></com.google.android.material.card.MaterialCardView><com.google.android.material.card.MaterialCardView android:id="@+id/mockDiagnostics" android:layout_width="0dp" android:layout_height="112dp" android:layout_columnWeight="1" android:layout_marginTop="5dp" android:layout_marginEnd="5dp" app:cardBackgroundColor="@color/ui_surface" app:cardCornerRadius="@dimen/ui_card_radius" app:cardElevation="0dp"><LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="46dp" android:layout_height="46dp" android:padding="9dp" android:src="@drawable/ic_action_diagnostics"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Diagnostics" android:textColor="@color/ui_text" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Check for issues" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout></com.google.android.material.card.MaterialCardView><com.google.android.material.card.MaterialCardView android:layout_width="0dp" android:layout_height="112dp" android:layout_columnWeight="1" android:layout_marginStart="5dp" android:layout_marginTop="5dp" app:cardBackgroundColor="@color/ui_surface" app:cardCornerRadius="@dimen/ui_card_radius" app:cardElevation="0dp"><LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="46dp" android:layout_height="46dp" android:padding="10dp" android:src="@drawable/ic_action_more"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="More Tools" android:textColor="@color/ui_text" android:textStyle="bold"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DFU, Utilities, etc." android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout></com.google.android.material.card.MaterialCardView></GridLayout></LinearLayout></ScrollView>
-<LinearLayout android:layout_width="match_parent" android:layout_height="@dimen/ui_bottom_nav_height" android:background="@color/ui_surface" android:gravity="center" android:orientation="horizontal" android:paddingTop="6dp" android:paddingBottom="5dp"><LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="23dp" android:layout_height="23dp" android:src="@drawable/ic_nav_home" android:tint="@color/ui_primary"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Home" android:textColor="@color/ui_primary" android:textSize="10sp"/></LinearLayout><LinearLayout android:id="@+id/mockFirmware" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="23dp" android:layout_height="23dp" android:src="@drawable/ic_nav_firmware" android:tint="@color/ui_text_secondary"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Firmware" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="23dp" android:layout_height="23dp" android:src="@drawable/ic_nav_devices" android:tint="@color/ui_text_secondary"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Devices" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout><LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical"><ImageView android:layout_width="23dp" android:layout_height="23dp" android:src="@drawable/ic_nav_tools" android:tint="@color/ui_text_secondary"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Tools" android:textColor="@color/ui_text_secondary" android:textSize="10sp"/></LinearLayout></LinearLayout></LinearLayout>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ui_background"
+    android:orientation="vertical">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/mockMenu"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Menu"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_menu" />
+
+                <ImageView
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="5dp"
+                    android:contentDescription="iDeviceRestore"
+                    android:src="@drawable/ic_app_logo" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="9dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="iDeviceRestore"
+                        android:textColor="@color/ui_text"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="Restore • Update • Recover"
+                        android:textColor="@color/ui_text_secondary"
+                        android:textSize="9sp" />
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/mockSettings"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Settings"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_settings"
+                    app:tint="@color/ui_text_secondary" />
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                app:cardBackgroundColor="@color/ui_surface"
+                app:cardCornerRadius="14dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/ui_border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:paddingStart="13dp"
+                    android:paddingTop="14dp"
+                    android:paddingEnd="13dp"
+                    android:paddingBottom="12dp">
+
+                    <ImageView
+                        android:layout_width="210dp"
+                        android:layout_height="132dp"
+                        android:contentDescription="MacBook Air"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/mock_asset_macbook" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="MacBook Air (M1, 2020)"
+                        android:textColor="@color/ui_text"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="MacBookAir10,1"
+                        android:textColor="@color/ui_text_secondary"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="26dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/mock_reference_status_pill"
+                        android:gravity="center"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="●  Recovery Mode"
+                        android:textColor="@color/ui_text"
+                        android:textSize="10sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical">
+
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="27dp" android:gravity="center_vertical" android:orientation="horizontal">
+                            <TextView android:layout_width="92dp" android:layout_height="wrap_content" android:text="ECID" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="0x1234567890ABCDEF" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="27dp" android:gravity="center_vertical" android:orientation="horizontal">
+                            <TextView android:layout_width="92dp" android:layout_height="wrap_content" android:text="CPID" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="0x8103" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="27dp" android:gravity="center_vertical" android:orientation="horizontal">
+                            <TextView android:layout_width="92dp" android:layout_height="wrap_content" android:text="Model" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="MacBookAir10,1" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+                        <com.google.android.material.button.MaterialButton
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="View Details"
+                            android:textAllCaps="false"
+                            android:textColor="@color/ui_text"
+                            android:textSize="12sp"
+                            app:backgroundTint="@color/ui_surface"
+                            app:cornerRadius="9dp"
+                            app:strokeColor="@color/ui_border"
+                            app:strokeWidth="1dp" />
+                        <Space android:layout_width="8dp" android:layout_height="1dp" />
+                        <com.google.android.material.button.MaterialButton
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="Change Mode"
+                            android:textAllCaps="false"
+                            android:textColor="@android:color/white"
+                            android:textSize="12sp"
+                            app:backgroundTint="@color/ui_primary"
+                            app:cornerRadius="9dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="126dp"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/mockFirmware"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    app:cardBackgroundColor="@color/ui_surface"
+                    app:cardCornerRadius="13dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/ui_border"
+                    app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:padding="9dp">
+                        <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="Download firmware" android:src="@drawable/ic_cloud_download" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:gravity="center" android:text="Download Firmware" android:textColor="@color/ui_text" android:textSize="12sp" android:textStyle="bold" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="center" android:maxLines="2" android:text="Get the latest or choose\nfrom signed releases" android:textColor="@color/ui_text_secondary" android:textSize="9sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <Space android:layout_width="8dp" android:layout_height="1dp" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/mockRestore"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    app:cardBackgroundColor="@color/ui_surface"
+                    app:cardCornerRadius="13dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/ui_border"
+                    app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:padding="9dp">
+                        <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="Restore device" android:src="@drawable/ic_action_restore" android:tint="@color/ui_primary" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:gravity="center" android:text="Restore Device" android:textColor="@color/ui_text" android:textSize="12sp" android:textStyle="bold" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="center" android:maxLines="2" android:text="Erase and install\nfirmware" android:textColor="@color/ui_text_secondary" android:textSize="9sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="126dp"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    app:cardBackgroundColor="@color/ui_surface"
+                    app:cardCornerRadius="13dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/ui_border"
+                    app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:padding="9dp">
+                        <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="Update device" android:src="@drawable/ic_action_update" android:tint="@color/ui_primary" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:gravity="center" android:text="Update Device" android:textColor="@color/ui_text" android:textSize="12sp" android:textStyle="bold" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="center" android:maxLines="2" android:text="Install the latest version" android:textColor="@color/ui_text_secondary" android:textSize="9sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <Space android:layout_width="8dp" android:layout_height="1dp" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/mockDiagnostics"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    app:cardBackgroundColor="@color/ui_surface"
+                    app:cardCornerRadius="13dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/ui_border"
+                    app:strokeWidth="1dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:padding="9dp">
+                        <ImageView android:layout_width="34dp" android:layout_height="34dp" android:contentDescription="Run diagnostics" android:src="@drawable/ic_action_diagnostics" android:tint="@color/ui_primary" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:gravity="center" android:text="Run Diagnostics" android:textColor="@color/ui_text" android:textSize="12sp" android:textStyle="bold" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:gravity="center" android:maxLines="2" android:text="Check device health\nand troubleshoot" android:textColor="@color/ui_text_secondary" android:textSize="9sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="68dp"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/ui_surface_soft"
+                app:cardCornerRadius="13dp"
+                app:cardElevation="0dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="12dp" android:paddingEnd="10dp">
+                    <View android:layout_width="18dp" android:layout_height="18dp" android:background="@drawable/mock_icon_circle" android:backgroundTint="@color/ui_success" />
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="10dp" android:layout_weight="1" android:orientation="vertical">
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Device Connected" android:textColor="@color/ui_text" android:textSize="11sp" android:textStyle="bold" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:text="MacBook Air (M1, 2020)" android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Recovery Mode" android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                    </LinearLayout>
+                    <ImageView android:layout_width="20dp" android:layout_height="20dp" android:contentDescription="Device details" android:src="@drawable/ic_chevron_right" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/view_mockup_bottom_nav" />
+</LinearLayout>
