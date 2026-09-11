@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ui_background"
+    android:orientation="vertical">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/settingsBack"
+                    android:layout_width="36dp"
+                    android:layout_height="40dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Back"
+                    android:padding="7dp"
+                    android:src="@drawable/ic_back" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Settings"
+                    android:textColor="@color/ui_text"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="38dp"
+                android:gravity="bottom"
+                android:paddingBottom="8dp"
+                android:text="App Behavior"
+                android:textColor="@color/ui_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/ui_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/ui_border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Automatically detect devices" android:textColor="@color/ui_text" android:textSize="12sp" />
+                        <FrameLayout android:layout_width="42dp" android:layout_height="24dp" android:background="@drawable/bg_toggle_on">
+                            <View android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical" android:layout_marginEnd="2dp" android:background="@drawable/bg_toggle_thumb" />
+                        </FrameLayout>
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Check for app updates at launch" android:textColor="@color/ui_text" android:textSize="12sp" />
+                        <FrameLayout android:layout_width="42dp" android:layout_height="24dp" android:background="@drawable/bg_toggle_on">
+                            <View android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical" android:layout_marginEnd="2dp" android:background="@drawable/bg_toggle_thumb" />
+                        </FrameLayout>
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Use verbose logging" android:textColor="@color/ui_text" android:textSize="12sp" />
+                        <FrameLayout android:layout_width="42dp" android:layout_height="24dp" android:background="@drawable/bg_toggle_off">
+                            <View android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="start|center_vertical" android:layout_marginStart="2dp" android:background="@drawable/bg_toggle_thumb" />
+                        </FrameLayout>
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Show confirmation dialogs" android:textColor="@color/ui_text" android:textSize="12sp" />
+                        <FrameLayout android:layout_width="42dp" android:layout_height="24dp" android:background="@drawable/bg_toggle_on">
+                            <View android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical" android:layout_marginEnd="2dp" android:background="@drawable/bg_toggle_thumb" />
+                        </FrameLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:gravity="bottom"
+                android:paddingBottom="8dp"
+                android:text="Downloads"
+                android:textColor="@color/ui_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/ui_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/ui_border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="66dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="10dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Default Download Directory" android:textColor="@color/ui_text" android:textSize="12sp" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="/storage/emulated/0/iDeviceRestore" android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                        </LinearLayout>
+                        <ImageView android:layout_width="20dp" android:layout_height="20dp" android:contentDescription="Open download directory" android:src="@drawable/ic_chevron_right" />
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="76dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Organize firmware by device" android:textColor="@color/ui_text" android:textSize="12sp" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Save downloads in folders by device, model and version." android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                        </LinearLayout>
+                        <FrameLayout android:layout_width="42dp" android:layout_height="24dp" android:layout_marginStart="10dp" android:background="@drawable/bg_toggle_on">
+                            <View android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical" android:layout_marginEnd="2dp" android:background="@drawable/bg_toggle_thumb" />
+                        </FrameLayout>
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="54dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="10dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Concurrent Downloads" android:textColor="@color/ui_text" android:textSize="12sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="6dp" android:text="3" android:textColor="@color/ui_text_secondary" android:textSize="12sp" />
+                        <ImageView android:layout_width="20dp" android:layout_height="20dp" android:contentDescription="Concurrent downloads" android:src="@drawable/ic_chevron_right" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:gravity="bottom"
+                android:paddingBottom="8dp"
+                android:text="Appearance"
+                android:textColor="@color/ui_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/ui_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/ui_border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="126dp" android:gravity="center" android:orientation="horizontal" android:paddingStart="10dp" android:paddingEnd="10dp">
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                        <com.google.android.material.card.MaterialCardView android:layout_width="82dp" android:layout_height="66dp" app:cardBackgroundColor="#F7F9FC" app:cardCornerRadius="8dp" app:cardElevation="0dp" app:strokeColor="@color/ui_primary" app:strokeWidth="2dp">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp">
+                                <View android:layout_width="42dp" android:layout_height="7dp" android:background="@color/ui_text" />
+                                <View android:layout_width="match_parent" android:layout_height="18dp" android:layout_marginTop="8dp" android:background="@color/ui_surface" />
+                                <View android:layout_width="match_parent" android:layout_height="5dp" android:layout_marginTop="7dp" android:background="@color/ui_primary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Light" android:textColor="@color/ui_primary" android:textSize="11sp" android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                        <com.google.android.material.card.MaterialCardView android:layout_width="82dp" android:layout_height="66dp" app:cardBackgroundColor="#151922" app:cardCornerRadius="8dp" app:cardElevation="0dp" app:strokeColor="@color/ui_border" app:strokeWidth="1dp">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp">
+                                <View android:layout_width="42dp" android:layout_height="7dp" android:background="#F4F6FA" />
+                                <View android:layout_width="match_parent" android:layout_height="18dp" android:layout_marginTop="8dp" android:background="#262C37" />
+                                <View android:layout_width="match_parent" android:layout_height="5dp" android:layout_marginTop="7dp" android:background="@color/ui_primary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Dark" android:textColor="@color/ui_text" android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                        <com.google.android.material.card.MaterialCardView android:layout_width="82dp" android:layout_height="66dp" app:cardCornerRadius="8dp" app:cardElevation="0dp" app:strokeColor="@color/ui_border" app:strokeWidth="1dp">
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal">
+                                <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="#F7F9FC" android:orientation="vertical" android:padding="6dp">
+                                    <View android:layout_width="24dp" android:layout_height="6dp" android:background="@color/ui_text" />
+                                    <View android:layout_width="match_parent" android:layout_height="18dp" android:layout_marginTop="8dp" android:background="@color/ui_surface" />
+                                </LinearLayout>
+                                <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:background="#151922" android:orientation="vertical" android:padding="6dp">
+                                    <View android:layout_width="24dp" android:layout_height="6dp" android:background="#F4F6FA" />
+                                    <View android:layout_width="match_parent" android:layout_height="18dp" android:layout_marginTop="8dp" android:background="#262C37" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="System" android:textColor="@color/ui_text" android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:gravity="bottom"
+                android:paddingBottom="8dp"
+                android:text="About"
+                android:textColor="@color/ui_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/ui_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/ui_border"
+                app:strokeWidth="1dp">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="78dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="13dp">
+                        <ImageView android:layout_width="42dp" android:layout_height="42dp" android:contentDescription="iDeviceRestore" android:src="@drawable/ic_app_about" />
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="11dp" android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="iDeviceRestore" android:textColor="@color/ui_text" android:textSize="13sp" android:textStyle="bold" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="v1.0.0 (100)" android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Restore. Update. Diagnose. For Apple devices." android:textColor="@color/ui_text_secondary" android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                    <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginStart="13dp" android:background="@color/ui_border" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="13dp" android:paddingEnd="10dp">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Open Source Licenses" android:textColor="@color/ui_primary" android:textSize="12sp" />
+                        <ImageView android:layout_width="20dp" android:layout_height="20dp" android:contentDescription="Open source licenses" android:src="@drawable/ic_chevron_right" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/view_mockup_bottom_nav" />
+</LinearLayout>

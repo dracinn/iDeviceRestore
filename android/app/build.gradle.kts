@@ -93,35 +93,9 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+        manifestPlaceholders["appLabel"] = "iDeviceRestore"
         ndk {
             abiFilters += "arm64-v8a"
-        }
-    }
-
-    flavorDimensions += "design"
-    productFlavors {
-        create("reference") {
-            dimension = "design"
-            manifestPlaceholders["appLabel"] = "iDeviceRestore Reference"
-            buildConfigField("String", "DESIGN_ITERATION", "\"reference\"")
-        }
-        create("compact") {
-            dimension = "design"
-            versionNameSuffix = "-compact"
-            manifestPlaceholders["appLabel"] = "iDeviceRestore Compact"
-            buildConfigField("String", "DESIGN_ITERATION", "\"compact\"")
-        }
-        create("comfort") {
-            dimension = "design"
-            versionNameSuffix = "-comfort"
-            manifestPlaceholders["appLabel"] = "iDeviceRestore Comfort"
-            buildConfigField("String", "DESIGN_ITERATION", "\"comfort\"")
-        }
-        create("minimal") {
-            dimension = "design"
-            versionNameSuffix = "-minimal"
-            manifestPlaceholders["appLabel"] = "iDeviceRestore Minimal"
-            buildConfigField("String", "DESIGN_ITERATION", "\"minimal\"")
         }
     }
 
@@ -151,7 +125,6 @@ android {
 
     buildTypes {
         getByName("release") {
-            manifestPlaceholders["appLabel"] = "iDeviceRestore"
             if (!releaseKeystorePath.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }

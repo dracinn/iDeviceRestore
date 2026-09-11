@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Approved mockup design system. UI code should consume these tokens rather than backend-era styles. -->
+    <color name="ui_background">#F6F8FC</color>
+    <color name="ui_surface">#FFFFFF</color>
+    <color name="ui_surface_soft">#F2F5FA</color>
+    <color name="ui_primary">#0A73FF</color>
+    <color name="ui_primary_soft">#E7F2FF</color>
+    <color name="ui_text">#10131A</color>
+    <color name="ui_text_secondary">#586171</color>
+    <color name="ui_border">#DCE2EA</color>
+    <color name="ui_success">#20B65A</color>
+    <color name="ui_success_soft">#DDF6E6</color>
+    <color name="ui_disabled">#C9CFD9</color>
+
+    <dimen name="ui_screen_horizontal">14dp</dimen>
+    <dimen name="ui_card_radius">13dp</dimen>
+    <dimen name="ui_control_radius">10dp</dimen>
+    <dimen name="ui_card_gap">10dp</dimen>
+    <dimen name="ui_row_height">48dp</dimen>
+    <dimen name="ui_bottom_nav_height">70dp</dimen>
+</resources>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/ui_bottom_nav_height"
+    android:background="@color/ui_surface"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:paddingTop="6dp"
+    android:paddingBottom="5dp">
+
+    <LinearLayout android:id="@+id/navHome" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+        <ImageView android:id="@+id/navHomeIcon" android:layout_width="22dp" android:layout_height="22dp" android:contentDescription="Home" android:src="@drawable/ic_nav_home" android:tint="@color/ui_text_secondary"/>
+        <TextView android:id="@+id/navHomeLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Home" android:textColor="@color/ui_text_secondary" android:textSize="9sp"/>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/navDevices" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+        <ImageView android:id="@+id/navDevicesIcon" android:layout_width="22dp" android:layout_height="22dp" android:contentDescription="Devices" android:src="@drawable/ic_nav_devices" android:tint="@color/ui_text_secondary"/>
+        <TextView android:id="@+id/navDevicesLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Devices" android:textColor="@color/ui_text_secondary" android:textSize="9sp"/>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/navFirmware" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+        <ImageView android:id="@+id/navFirmwareIcon" android:layout_width="22dp" android:layout_height="22dp" android:contentDescription="Firmware" android:src="@drawable/ic_nav_firmware" android:tint="@color/ui_text_secondary"/>
+        <TextView android:id="@+id/navFirmwareLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Firmware" android:textColor="@color/ui_text_secondary" android:textSize="9sp"/>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/navRestore" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+        <ImageView android:id="@+id/navRestoreIcon" android:layout_width="22dp" android:layout_height="22dp" android:contentDescription="Restore" android:src="@drawable/ic_nav_restore" android:tint="@color/ui_text_secondary"/>
+        <TextView android:id="@+id/navRestoreLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Restore" android:textColor="@color/ui_text_secondary" android:textSize="9sp"/>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/navDiagnostics" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+        <ImageView android:id="@+id/navDiagnosticsIcon" android:layout_width="22dp" android:layout_height="22dp" android:contentDescription="Diagnostics" android:src="@drawable/ic_nav_diagnostics" android:tint="@color/ui_text_secondary"/>
+        <TextView android:id="@+id/navDiagnosticsLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:text="Diagnostics" android:textColor="@color/ui_text_secondary" android:textSize="9sp"/>
+    </LinearLayout>
+</LinearLayout>
